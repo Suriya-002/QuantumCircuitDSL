@@ -50,7 +50,7 @@ jobs:
         env:
           CC: ${{ matrix.cc }}
           CXX: ${{ matrix.cxx }}
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DQCDSL_BUILD_BENCH=ON
 
       - name: Build
         run: cmake --build build --parallel
@@ -81,7 +81,7 @@ jobs:
 
       - name: clang-format (check only)
         run: |
-          find include python tests \( -name '*.hpp' -o -name '*.cpp' \) -print0 \
+          find include python tests bench \( -name '*.hpp' -o -name '*.cpp' \) -print0 \
             | xargs -0 clang-format --dry-run --Werror
 
       - name: Configure for compile_commands.json
@@ -90,7 +90,8 @@ jobs:
       - name: clang-tidy
         run: |
           clang-tidy -p build \
-            tests/test_gate.cpp tests/test_circuit.cpp tests/test_statevector.cpp
+            tests/test_gate.cpp tests/test_circuit.cpp tests/test_statevector.cpp \
+            tests/test_dag.cpp tests/test_passes.cpp
 
   coverage:
     name: coverage

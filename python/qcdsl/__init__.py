@@ -1,11 +1,18 @@
 """qcdsl -- a C++17 quantum circuit compiler with Python bindings."""
 
 from ._qcdsl import (  # noqa: F401
+    CancelInversePairs,
     Circuit,
+    DecomposeToCx,
     Dag,
     DagNode,
     Gate,
     GateKind,
+    MergeRotations,
+    Pass,
+    PassManager,
+    PassStats,
+    RemoveIdentities,
     Statevector,
     __version__,
     arity,
@@ -15,9 +22,16 @@ from ._qcdsl import (  # noqa: F401
 )
 
 __all__ = [
+    "CancelInversePairs",
     "Circuit",
     "Dag",
     "DagNode",
+    "DecomposeToCx",
+    "MergeRotations",
+    "Pass",
+    "PassManager",
+    "PassStats",
+    "RemoveIdentities",
     "Gate",
     "GateKind",
     "Statevector",

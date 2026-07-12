@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 # Local rehearsal of the CI pipeline. Run before every push.
-# Tool versions are pinned to match .github/workflows/ci.yml exactly -- a gate
-# that reports a different number here than in CI is worse than no gate.
 set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -17,7 +15,7 @@ clang-format --version
 gcovr --version | head -1
 
 step "build"
-cmake -S "$SRC" -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release > /dev/null
+cmake -S "$SRC" -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release -DQCDSL_BUILD_BENCH=ON > /dev/null
 cmake --build "$BUILD" --parallel > /dev/null
 echo ok
 
@@ -28,13 +26,14 @@ step "Python tests (incl. the Qiskit oracle)"
 PYTHONPATH="$BUILD/python" python3 -m pytest python/tests -q
 
 step "clang-format"
-find include python tests \( -name '*.hpp' -o -name '*.cpp' \) -print0 \
+find include python tests bench \( -name '*.hpp' -o -name '*.cpp' \) -print0 \
   | xargs -0 clang-format --dry-run --Werror
 echo clean
 
 step "clang-tidy"
 cmake -S "$SRC" -B "${BUILD}-tidy" -G Ninja -DCMAKE_BUILD_TYPE=Debug -DQCDSL_BUILD_PYTHON=OFF > /dev/null
-clang-tidy -p "${BUILD}-tidy" tests/test_gate.cpp tests/test_circuit.cpp tests/test_statevector.cpp 2>/dev/null
+clang-tidy -p "${BUILD}-tidy" tests/test_gate.cpp tests/test_circuit.cpp \
+  tests/test_statevector.cpp tests/test_dag.cpp tests/test_passes.cpp 2>/dev/null
 echo clean
 
 step "coverage (minimum 90 percent)"
@@ -42,5 +41,8 @@ cmake -S "$SRC" -B "$COV" -G Ninja -DCMAKE_BUILD_TYPE=Debug -DQCDSL_COVERAGE=ON 
 cmake --build "$COV" --parallel > /dev/null
 ctest --test-dir "$COV" > /dev/null
 gcovr --root "$SRC" --filter 'include/qcdsl/' --print-summary --fail-under-line 90 "$COV" 2>/dev/null | tail -3
+
+step "optimisation benchmark"
+"$BUILD/bench/qcdsl_bench_optimise"
 
 printf '\nALL GREEN - safe to push\n'

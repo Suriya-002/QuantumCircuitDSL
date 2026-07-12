@@ -134,6 +134,49 @@ PYBIND11_MODULE(_qcdsl, m) {
                " depth=" + std::to_string(d.depth()) + ">";
       });
 
+  py::class_<PassStats>(m, "PassStats")
+      .def_readonly("pass_name", &PassStats::pass)
+      .def_readonly("gates_before", &PassStats::gates_before)
+      .def_readonly("gates_after", &PassStats::gates_after)
+      .def_readonly("depth_before", &PassStats::depth_before)
+      .def_readonly("depth_after", &PassStats::depth_after)
+      .def("changed", &PassStats::changed)
+      .def("__repr__", [](const PassStats& s) {
+        return "<PassStats " + s.pass +
+               " gates=" + std::to_string(s.gates_before) + "->" +
+               std::to_string(s.gates_after) +
+               " depth=" + std::to_string(s.depth_before) + "->" +
+               std::to_string(s.depth_after) + ">";
+      });
+
+  py::class_<Pass, std::shared_ptr<Pass>>(m, "Pass")
+      .def("name", &Pass::name)
+      .def("__call__", &Pass::operator(), py::arg("circuit"));
+
+  py::class_<CancelInversePairs, Pass, std::shared_ptr<CancelInversePairs>>(
+      m, "CancelInversePairs")
+      .def(py::init<>());
+  py::class_<MergeRotations, Pass, std::shared_ptr<MergeRotations>>(
+      m, "MergeRotations")
+      .def(py::init<>());
+  py::class_<RemoveIdentities, Pass, std::shared_ptr<RemoveIdentities>>(
+      m, "RemoveIdentities")
+      .def(py::init<double>(), py::arg("eps") = 1e-12);
+  py::class_<DecomposeToCx, Pass, std::shared_ptr<DecomposeToCx>>(
+      m, "DecomposeToCx")
+      .def(py::init<>());
+
+  py::class_<PassManager>(m, "PassManager")
+      .def(py::init<>())
+      .def("add", &PassManager::add, py::arg("pass"),
+           py::return_value_policy::reference_internal)
+      .def("run", &PassManager::run, py::arg("circuit"))
+      .def("run_to_fixed_point", &PassManager::run_to_fixed_point,
+           py::arg("circuit"), py::arg("max_sweeps") = 16)
+      .def("stats", &PassManager::stats)
+      .def("sweeps", &PassManager::sweeps)
+      .def("__len__", &PassManager::size);
+
   m.def("simulate", &simulate<double>, py::arg("circuit"),
         "Simulate a circuit from the all-zero state.");
 }

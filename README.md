@@ -52,11 +52,12 @@ nothing is listed here that does not have a test behind it.
 | State-vector simulator (scalar reference) | done |
 | Cross-validation against Qiskit on random circuits | done |
 | DAG IR (dependency graph, topological schedule) | done |
-| Passes: gate fusion, Clifford+T decomposition | planned |
+| Passes: cancellation, rotation fusion, CX gate-set targeting | done |
+| Full single-qubit fusion (U gate + global phase) | planned |
 | OpenQASM 3.0 import / export | planned |
 | SIMD (AVX-512) + OpenMP gate kernels, benchmarks | planned |
 
-79 C++ tests, 183 Python tests, 97% line coverage and 100% function coverage
+101 C++ tests, 231 Python tests, 96% line coverage and 100% function coverage
 (gated at 90% in CI). The C++ suite is a GoogleTest *typed* suite -- the whole
 battery runs against both the `double` and the `float` instantiation, because a
 templated backend with one tested instantiation is a half-tested backend.
@@ -88,6 +89,42 @@ over-constrained IR computes the right answer, it just schedules badly. Only the
 depth cross-check catches it. Drop the dependency on a two-qubit gate's second
 wire and the state tests fail. Neither test alone is sufficient; together they
 admit exactly one edge set.
+
+## Optimisation
+
+Four passes, all exact -- none of them approximates an angle or drops a global
+phase, which is why each can be validated by simulating both sides and demanding
+amplitude-for-amplitude equality:
+
+| pass | rewrite |
+|---|---|
+| `CancelInversePairs` | `g . g^-1` -> nothing, when adjacent on every shared wire |
+| `MergeRotations` | `RZ(a) . RZ(b)` -> `RZ(a+b)`, same axis only |
+| `RemoveIdentities` | drops `I` and zero-angle rotations |
+| `DecomposeToCx` | `CZ` -> `H CX H`, `SWAP` -> three `CX` |
+
+`PassManager` runs a pipeline to a fixed point, because passes enable one
+another: cancelling `H . H` can bring two rotations together, merging those can
+produce a zero angle, and removing that identity can expose a fresh inverse pair.
+
+`bench/optimise.cpp` produces the table below -- 300 circuits, 6 qubits, 200
+gates each. Positive is a reduction.
+
+| pipeline | gates | depth | CX-only |
+|---|---|---|---|
+| optimise only | **-40.3%** | **-45.1%** | no |
+| lower first | -21.7% | -20.5% | yes |
+| optimise -> lower -> optimise | **-22.6%** | **-22.0%** | yes |
+
+Optimising before lowering beats lowering first, which is the expected direction:
+once `CZ` has become `H CX H` the optimiser has to rediscover structure the
+higher-level gate stated outright.
+
+On *uniformly random* circuits the same pipeline **adds 30% more gates**. That is
+not a regression. `DecomposeToCx` turns one `CZ` into three gates and one `SWAP`
+into three; on a circuit with nothing to cancel there is nothing to pay for it.
+Decomposition is gate-set targeting, not optimisation, and hardware compliance
+has a price. Reporting only the flattering workload would hide that.
 
 ## Build
 

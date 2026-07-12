@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <iterator>
 #include <queue>
 #include <random>
 #include <stdexcept>
@@ -41,7 +42,8 @@ class Dag {
     std::vector<std::size_t> succs;
   };
 
-  explicit Dag(const Circuit& qc) : n_(qc.num_qubits()) {
+  explicit Dag(const Circuit& qc)
+      : n_(qc.num_qubits()), wires_(qc.num_qubits()) {
     nodes_.reserve(qc.size());
     std::vector<std::size_t> last(n_, kNone);
 
@@ -58,6 +60,7 @@ class Dag {
           nodes_[prev].succs.push_back(id);
         }
         last[q] = id;
+        wires_[q].push_back(id);
       }
     }
   }
@@ -82,6 +85,53 @@ class Dag {
       e += v.succs.size();
     }
     return e;
+  }
+
+  /// For each qubit, the gates touching it in program order.
+  ///
+  /// The edge list says gate A must precede gate B. It does not say they are
+  /// *adjacent* -- there could be a third gate between them on that wire. Every
+  /// peephole pass needs adjacency (you cannot cancel H . H if something sits
+  /// between them), and adjacency is a per-wire question, so the IR answers it
+  /// directly instead of making each pass rediscover it.
+  [[nodiscard]] const std::vector<std::vector<std::size_t>>& wires()
+      const noexcept {
+    return wires_;
+  }
+
+  /// The node immediately after `id` on wire `q`, or kNone if `id` is last.
+  /// Throws if `id` does not actually touch `q`.
+  [[nodiscard]] std::size_t next_on_wire(std::size_t id, Qubit q) const {
+    if (q >= n_) {
+      throw std::out_of_range("qubit index out of range");
+    }
+    const std::vector<std::size_t>& seq = wires_[q];
+    const auto it = std::find(seq.begin(), seq.end(), id);
+    if (it == seq.end()) {
+      throw std::invalid_argument("node " + std::to_string(id) +
+                                  " does not act on qubit " +
+                                  std::to_string(q));
+    }
+    const auto nxt = std::next(it);
+    return (nxt == seq.end()) ? kNone : *nxt;
+  }
+
+  /// True iff `b` is the very next gate after `a` on EVERY wire they share, and
+  /// they share every wire either one touches. This is the precondition for any
+  /// peephole rewrite: nothing can be hiding between them.
+  [[nodiscard]] bool are_adjacent(std::size_t a, std::size_t b) const {
+    const Gate& ga = node(a).gate;
+    const Gate& gb = node(b).gate;
+    if (ga.qubits.size() != gb.qubits.size()) {
+      return false;
+    }
+    // b must touch every wire a touches, and be the very next gate on each of
+    // them -- otherwise something is hiding between the two.
+    return std::all_of(ga.qubits.begin(), ga.qubits.end(), [&](Qubit q) {
+      const bool shared =
+          std::find(gb.qubits.begin(), gb.qubits.end(), q) != gb.qubits.end();
+      return shared && next_on_wire(a, q) == b;
+    });
   }
 
   /// Gates with no unmet dependency -- the ones that could execute right now.
@@ -251,6 +301,7 @@ class Dag {
 
   std::size_t n_;
   std::vector<Node> nodes_{};
+  std::vector<std::vector<std::size_t>> wires_;
 };
 
 }  // namespace qcdsl
