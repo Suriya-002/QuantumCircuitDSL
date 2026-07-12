@@ -16,6 +16,7 @@ add_executable(qcdsl_tests
   test_dag.cpp
   test_passes.cpp
   test_qasm3.cpp
+  test_kernels.cpp
 )
 
 target_link_libraries(qcdsl_tests PRIVATE qcdsl::qcdsl GTest::gtest_main)

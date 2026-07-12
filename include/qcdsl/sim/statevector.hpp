@@ -11,12 +11,9 @@
 
 #include "qcdsl/circuit.hpp"
 #include "qcdsl/gate.hpp"
+#include "qcdsl/sim/kernels.hpp"
 
 namespace qcdsl {
-
-/// A 2x2 single-qubit unitary, row-major: {u00, u01, u10, u11}.
-template <typename Real>
-using Matrix2 = std::array<std::complex<Real>, 4>;
 
 /// The 2x2 matrix for a single-qubit gate kind. `theta` is ignored by
 /// non-parametric kinds. Throws for two-qubit kinds and for MEASURE, which are
@@ -136,19 +133,15 @@ class Statevector {
   /// lets this vectorise later.
   void apply_1q(const Matrix2<Real>& u, Qubit target) {
     check_qubit(target);
-    const std::size_t bit = std::size_t(1) << target;
-    const std::size_t low = bit - 1;
-    const std::size_t half = amps_.size() >> 1;
-
-    for (std::size_t k = 0; k < half; ++k) {
-      const std::size_t i = ((k >> target) << (target + 1)) | (k & low);
-      const std::size_t j = i | bit;
-      const C a = amps_[i];
-      const C b = amps_[j];
-      amps_[i] = u[0] * a + u[1] * b;
-      amps_[j] = u[2] * a + u[3] * b;
-    }
+    kernel::apply_1q(amps_.data(), amps_.size(), u, target, kernel_);
   }
+
+  /// Which gate kernel to use. Defaults to Auto: the AVX-512 path when this CPU
+  /// allows it and the target qubit permits contiguous loads, OpenMP on top of
+  /// that once the vector is big enough to pay for the threads, scalar
+  /// otherwise. Every kernel computes the same thing; only the speed differs.
+  void set_kernel(Kernel k) noexcept { kernel_ = k; }
+  [[nodiscard]] Kernel kernel() const noexcept { return kernel_; }
 
   /// Apply a 2x2 unitary to `target`, but only on amplitudes where `control`
   /// is 1. Same pair enumeration; the control bit just gates the update.
@@ -264,6 +257,7 @@ class Statevector {
 
   std::size_t n_;
   std::vector<C> amps_{};
+  Kernel kernel_ = Kernel::Auto;
 };
 
 /// Convenience: simulate a circuit from the all-zero state.

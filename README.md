@@ -54,10 +54,11 @@ nothing is listed here that does not have a test behind it.
 | DAG IR (dependency graph, topological schedule) | done |
 | Passes: cancellation, rotation fusion, CX gate-set targeting | done |
 | OpenQASM 3.0 import / export (two-way Qiskit interop) | done |
+| SIMD (AVX-512) + OpenMP gate kernels, benchmarks | done |
 | Full single-qubit fusion (U gate + global phase) | planned |
-| SIMD (AVX-512) + OpenMP gate kernels, benchmarks | planned |
+| Cache-blocked multi-gate kernel (kill the bandwidth wall) | planned |
 
-115 C++ tests, 306 Python tests, 95% line coverage and 100% function coverage
+124 C++ tests, 306 Python tests, 95% line coverage and 100% function coverage
 (gated at 90% in CI). The C++ suite is a GoogleTest *typed* suite -- the whole
 battery runs against both the `double` and the `float` instantiation, because a
 templated backend with one tested instantiation is a half-tested backend.
@@ -144,7 +145,94 @@ into three; on a circuit with nothing to cancel there is nothing to pay for it.
 Decomposition is gate-set targeting, not optimisation, and hardware compliance
 has a price. Reporting only the flattering workload would hide that.
 
-## Build
+## Kernels
+
+Three kernels compute the same thing at different speeds. The scalar one is the
+reference the other two are validated against -- on every target qubit, on random
+circuits, and at the sizes where each one is at its worst -- so "speedup" always
+means speedup over code known to be correct.
+
+**The AVX-512 kernel is compiled unconditionally and gated at run time.** Building
+with `-mavx512f` would let the compiler emit AVX-512 anywhere it liked, and the
+binary would die with SIGILL on a machine without it, including some CI runners.
+Instead the vector path carries `__attribute__((target("avx512f")))` and
+`__builtin_cpu_supports` decides at the first call whether it may run.
+
+Amplitudes whose bit `t` is zero come in contiguous runs of `2^t`. For `t >= 2` a
+run is at least one full 512-bit register, so both halves of every pair load as a
+straight vector -- no gather, no shuffle. Targets 0 and 1 interleave inside a
+register and fall back to scalar: two of `n` targets, stated rather than hidden.
+There is no `float` vector kernel yet.
+
+`bench/simulate.cpp`, 100 single-qubit gates, best of 3, 8 threads:
+
+| qubits | amplitudes | scalar | AVX-512 | +OpenMP | SIMD | GB/s |
+|---:|---:|---:|---:|---:|---:|---:|
+| 14 | 16 K | 5.0 ms | 1.5 ms | 8.7 ms | **3.4x** | 35 |
+| 16 | 66 K | 17.3 ms | 5.6 ms | 9.2 ms | **3.1x** | 38 |
+| 18 | 262 K | 57.7 ms | 18.2 ms | 30.6 ms | **3.2x** | 46 |
+| 20 | 1.0 M | 241 ms | 112 ms | **91.8 ms** | 2.2x | 37 |
+| 22 | 4.2 M | 1054 ms | 643 ms | 749 ms | 1.6x | 21 |
+| 24 | 16.8 M | 4084 ms | 2253 ms | 2782 ms | 1.8x | 24 |
+
+### Is the baseline fair?
+
+The obvious objection is that the scalar kernel was denied AVX-512, so of course
+it lost. Give it everything -- `-O3 -march=native`, autovectoriser unleashed --
+and at 22 qubits it improves by **nine percent**. The hand-written kernel still
+wins 2.6x.
+
+The reason is the whole point. The speedup is not from *using* AVX-512
+instructions, it is from restructuring the loop so that AVX-512 *becomes usable*.
+The scalar kernel computes each index as `((k >> t) << (t + 1)) | (k & low)`. GCC
+sees bit arithmetic, cannot prove the resulting addresses are adjacent, and
+declines to vectorise. Blocking the loop makes contiguity a property of the loop
+bounds instead of a theorem about bit twiddling. No autovectoriser recovers that.
+
+### OpenMP wins exactly once, and the GB/s column says why
+
+Watch the achieved bandwidth. Each amplitude pair moves 64 bytes -- two 16-byte
+loads and two 16-byte stores -- so this is computed, not guessed. It holds at
+35-46 GB/s through 20 qubits and then **collapses to 21** at 22.
+
+That is the last-level cache boundary. At 20 qubits the state vector is 16 MB and
+still resident, so eight threads have real work to do and OpenMP finally wins
+(2.6x over scalar, beating the serial vector kernel's 2.2x). At 22 qubits it is
+67 MB, the kernel is waiting on DRAM, and eight threads only contend for one
+memory controller. Below 20 qubits the fork-join costs more than the gate.
+
+The window where threads help is one doubling wide, and it moves with the cache
+size and the channel count of the machine. So **`Kernel::Auto` does not use
+threads** -- a default that guesses wrong most of the time is worse than one that
+does not guess. `Kernel::Parallel` is there for anyone whose machine has the
+bandwidth headroom.
+
+The real fix is not more threads, it is fewer sweeps: every gate currently streams
+the whole state vector through the CPU once. Applying several gates to one
+cache-resident tile before moving on divides the memory traffic by the number of
+gates fused, turning a bandwidth-bound kernel back into a compute-bound one. That
+is the next kernel, and the point at which threads become worth having again.
+
+### Profile
+
+`scripts/profile.sh` runs `perf`, falling back to Callgrind where perf has no
+usable PMU -- WSL2 does not expose hardware counters to the guest, so Callgrind's
+simulated cache is the instrument there. At 18 qubits:
+
+| | |
+|---|---|
+| instructions in `apply_1q` | **99.86%** of 13.2 billion |
+| branch mispredictions | 2,788 of 774 million -- **0.0004%** |
+| last-level cache miss rate | 0.0% |
+
+The hot loop is the entire program: the `Gate` objects, the `Circuit` iteration
+and the kernel dispatch cost nothing measurable. The mispredict rate is the
+branch-free pair enumeration paying off -- it is why the loop vectorises at all.
+And the 0% LL miss rate at 18 qubits is the other end of the bandwidth story: at
+that size nothing reaches DRAM, which is exactly why the table reads 46 GB/s
+there and 21 GB/s at 22 qubits.
+
+## Build## Build
 
 Requires CMake ≥ 3.20 and a C++17 compiler. GoogleTest and pybind11 are pulled
 in by `FetchContent`; nothing needs to be installed by hand.

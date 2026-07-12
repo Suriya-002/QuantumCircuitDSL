@@ -18,6 +18,7 @@ option(QCDSL_BUILD_TESTS   "Build the C++ test suite"    ON)
 option(QCDSL_BUILD_PYTHON  "Build the pybind11 module"   ON)
 option(QCDSL_BUILD_BENCH   "Build the benchmark harness" OFF)
 option(QCDSL_COVERAGE      "Instrument for gcov"         OFF)
+option(QCDSL_OPENMP        "Use OpenMP for the parallel gate kernel" ON)
 
 # ---------------------------------------------------------------------------
 # The library itself is header-only: an INTERFACE target that carries the
@@ -31,6 +32,20 @@ target_include_directories(qcdsl INTERFACE
   $<INSTALL_INTERFACE:include>)
 
 target_compile_features(qcdsl INTERFACE cxx_std_17)
+
+# The AVX-512 kernel is compiled unconditionally via __attribute__((target(...)))
+# and gated at RUN time by __builtin_cpu_supports. Deliberately NOT -mavx512f:
+# that would let the compiler emit AVX-512 everywhere, and the binary would die
+# with SIGILL on any machine without it -- including some CI runners.
+if(QCDSL_OPENMP)
+  find_package(OpenMP)
+  if(OpenMP_CXX_FOUND)
+    target_link_libraries(qcdsl INTERFACE OpenMP::OpenMP_CXX)
+    message(STATUS "qcdsl: OpenMP enabled (parallel gate kernel)")
+  else()
+    message(STATUS "qcdsl: OpenMP not found -- the parallel kernel falls back to serial")
+  endif()
+endif()
 
 if(MSVC)
   target_compile_options(qcdsl INTERFACE /W4)

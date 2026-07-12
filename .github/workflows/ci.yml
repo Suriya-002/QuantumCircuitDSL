@@ -91,7 +91,8 @@ jobs:
         run: |
           clang-tidy -p build \
             tests/test_gate.cpp tests/test_circuit.cpp tests/test_statevector.cpp \
-            tests/test_dag.cpp tests/test_passes.cpp tests/test_qasm3.cpp
+            tests/test_dag.cpp tests/test_passes.cpp tests/test_qasm3.cpp \
+            tests/test_kernels.cpp
 
   coverage:
     name: coverage
