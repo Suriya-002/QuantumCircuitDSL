@@ -1,11 +1,18 @@
-#include <pybind11/operators.h>
+#include <pybind11/complex.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+
+#include <cstddef>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "qcdsl/qcdsl.hpp"
 
 namespace py = pybind11;
 using namespace qcdsl;
+
+using SV = Statevector<double>;
 
 PYBIND11_MODULE(_qcdsl, m) {
   m.doc() = "qcdsl: C++17 quantum circuit compiler (native module)";
@@ -33,6 +40,9 @@ PYBIND11_MODULE(_qcdsl, m) {
         "Number of qubits a gate kind acts on.");
   m.def("is_parametric", &is_parametric, py::arg("kind"),
         "True for gates carrying a rotation angle.");
+  m.def(
+      "gate_name", [](GateKind k) { return std::string(to_string(k)); },
+      py::arg("kind"), "The OpenQASM name of a gate kind.");
 
   py::class_<Gate>(m, "Gate")
       .def(py::init<GateKind, std::vector<Qubit>, double>(), py::arg("kind"),
@@ -45,7 +55,9 @@ PYBIND11_MODULE(_qcdsl, m) {
         std::string r = std::string("<Gate ") + to_string(g.kind) + " on [";
         for (std::size_t i = 0; i < g.qubits.size(); ++i) {
           r += std::to_string(g.qubits[i]);
-          if (i + 1 < g.qubits.size()) r += ", ";
+          if (i + 1 < g.qubits.size()) {
+            r += ", ";
+          }
         }
         return r + "]>";
       });
@@ -71,4 +83,25 @@ PYBIND11_MODULE(_qcdsl, m) {
                " size=" + std::to_string(c.size()) +
                " depth=" + std::to_string(c.depth()) + ">";
       });
+
+  py::class_<SV>(m, "Statevector")
+      .def(py::init<std::size_t>(), py::arg("num_qubits"))
+      .def_property_readonly("num_qubits", &SV::num_qubits)
+      .def_property_readonly("dim", &SV::dim)
+      .def("amplitudes", &SV::amplitudes,
+           "All 2**n amplitudes, index-ordered with qubit 0 as the least "
+           "significant bit (Qiskit's convention).")
+      .def("amplitude", &SV::amplitude, py::arg("index"))
+      .def("probabilities", &SV::probabilities)
+      .def("norm", &SV::norm)
+      .def("apply", &SV::apply, py::arg("gate"))
+      .def("run", &SV::run, py::arg("circuit"))
+      .def("__len__", &SV::dim)
+      .def("__repr__", [](const SV& sv) {
+        return "<Statevector qubits=" + std::to_string(sv.num_qubits()) +
+               " dim=" + std::to_string(sv.dim()) + ">";
+      });
+
+  m.def("simulate", &simulate<double>, py::arg("circuit"),
+        "Simulate a circuit from the all-zero state.");
 }

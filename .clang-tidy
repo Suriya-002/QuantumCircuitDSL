@@ -8,6 +8,8 @@ Checks: >
   -readability-identifier-length,
   -readability-magic-numbers,
   -readability-redundant-member-init,
-  -readability-uppercase-literal-suffix
+  -readability-uppercase-literal-suffix,
+  -clang-diagnostic-gnu-zero-variadic-macro-arguments,
+  -modernize-use-auto
 WarningsAsErrors: 'bugprone-*,performance-*'
 HeaderFilterRegex: 'include/qcdsl/.*'

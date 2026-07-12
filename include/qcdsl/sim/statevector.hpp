@@ -197,26 +197,46 @@ class Statevector {
   }
 
   /// Dispatch one gate onto the vector.
+  ///
+  /// The Gate constructor already enforces that a gate carries exactly
+  /// arity(kind) wires, but that invariant lives in another translation unit
+  /// and neither the compiler nor a reader can see it here. Re-check it, so the
+  /// indexing below is provably in bounds rather than merely correct.
   void apply(const Gate& g) {
+    if (g.qubits.size() != arity(g.kind)) {
+      throw std::invalid_argument(
+          std::string("gate '") + to_string(g.kind) + "' carries " +
+          std::to_string(g.qubits.size()) + " wires but needs " +
+          std::to_string(arity(g.kind)));
+    }
+    if (g.qubits.empty()) {
+      throw std::invalid_argument("gate carries no wires");
+    }
+    const Qubit q0 = g.qubits[0];
+
     switch (g.kind) {
       case GateKind::CX:
-        apply_controlled_1q(matrix_of<Real>(GateKind::X), g.qubits[0],
-                            g.qubits[1]);
-        return;
       case GateKind::CZ:
-        apply_controlled_1q(matrix_of<Real>(GateKind::Z), g.qubits[0],
-                            g.qubits[1]);
+      case GateKind::SWAP: {
+        if (g.qubits.size() < 2) {
+          throw std::invalid_argument("two-qubit gate is missing a wire");
+        }
+        const Qubit q1 = g.qubits[1];
+        if (g.kind == GateKind::SWAP) {
+          apply_swap(q0, q1);
+        } else {
+          const GateKind base =
+              (g.kind == GateKind::CX) ? GateKind::X : GateKind::Z;
+          apply_controlled_1q(matrix_of<Real>(base), q0, q1);
+        }
         return;
-      case GateKind::SWAP:
-        apply_swap(g.qubits[0], g.qubits[1]);
-        return;
+      }
       case GateKind::MEASURE:
         throw std::invalid_argument(
             "the state-vector backend does not simulate measurement; strip "
             "measurements before simulating");
       default:
-        apply_1q(matrix_of<Real>(g.kind, static_cast<Real>(g.param)),
-                 g.qubits[0]);
+        apply_1q(matrix_of<Real>(g.kind, static_cast<Real>(g.param)), q0);
         return;
     }
   }

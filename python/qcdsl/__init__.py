@@ -4,16 +4,22 @@ from ._qcdsl import (  # noqa: F401
     Circuit,
     Gate,
     GateKind,
+    Statevector,
     __version__,
     arity,
+    gate_name,
     is_parametric,
+    simulate,
 )
 
 __all__ = [
     "Circuit",
     "Gate",
     "GateKind",
+    "Statevector",
     "arity",
+    "gate_name",
     "is_parametric",
+    "simulate",
     "__version__",
 ]

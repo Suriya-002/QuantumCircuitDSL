@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Local rehearsal of the CI pipeline. Run before every push.
+# Tool versions are pinned to match .github/workflows/ci.yml exactly -- a gate
+# that reports a different number here than in CI is worse than no gate.
 set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -10,6 +12,10 @@ export PATH="$HOME/.local/bin:$PATH"
 step() { printf '\n== %s ==\n' "$1"; }
 cd "$SRC"
 
+step "tool versions (must match ci.yml)"
+clang-format --version
+gcovr --version | head -1
+
 step "build"
 cmake -S "$SRC" -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release > /dev/null
 cmake --build "$BUILD" --parallel > /dev/null
@@ -18,7 +24,7 @@ echo ok
 step "C++ tests"
 ctest --test-dir "$BUILD" --output-on-failure | tail -n 30
 
-step "Python tests"
+step "Python tests (incl. the Qiskit oracle)"
 PYTHONPATH="$BUILD/python" python3 -m pytest python/tests -q
 
 step "clang-format"
@@ -31,7 +37,7 @@ cmake -S "$SRC" -B "${BUILD}-tidy" -G Ninja -DCMAKE_BUILD_TYPE=Debug -DQCDSL_BUI
 clang-tidy -p "${BUILD}-tidy" tests/test_gate.cpp tests/test_circuit.cpp tests/test_statevector.cpp 2>/dev/null
 echo clean
 
-step "coverage (gate: 90%)"
+step "coverage (minimum 90 percent)"
 cmake -S "$SRC" -B "$COV" -G Ninja -DCMAKE_BUILD_TYPE=Debug -DQCDSL_COVERAGE=ON -DQCDSL_BUILD_PYTHON=OFF > /dev/null
 cmake --build "$COV" --parallel > /dev/null
 ctest --test-dir "$COV" > /dev/null
