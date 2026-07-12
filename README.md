@@ -1,6 +1,6 @@
 # qcdsl
 
-[![ci](https://github.com/USERNAME/quantum-circuit-dsl/actions/workflows/ci.yml/badge.svg)](https://github.com/USERNAME/quantum-circuit-dsl/actions/workflows/ci.yml)
+[![ci](https://github.com/Suriya-002/QuantumCircuitDSL/actions/workflows/ci.yml/badge.svg)](https://github.com/Suriya-002/QuantumCircuitDSL/actions/workflows/ci.yml)
 
 A quantum circuit **compiler** in C++17: a DAG intermediate representation,
 optimisation passes over that IR, a SIMD state-vector backend to check the
