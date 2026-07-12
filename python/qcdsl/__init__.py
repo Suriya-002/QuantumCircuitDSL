@@ -12,13 +12,16 @@ from ._qcdsl import (  # noqa: F401
     Pass,
     PassManager,
     PassStats,
+    QasmError,
     RemoveIdentities,
     Statevector,
     __version__,
     arity,
+    from_qasm3,
     gate_name,
     is_parametric,
     simulate,
+    to_qasm3,
 )
 
 __all__ = [
@@ -31,13 +34,16 @@ __all__ = [
     "Pass",
     "PassManager",
     "PassStats",
+    "QasmError",
     "RemoveIdentities",
     "Gate",
     "GateKind",
     "Statevector",
     "arity",
+    "from_qasm3",
     "gate_name",
     "is_parametric",
     "simulate",
+    "to_qasm3",
     "__version__",
 ]

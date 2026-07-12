@@ -10,6 +10,7 @@ Checks: >
   -readability-redundant-member-init,
   -readability-uppercase-literal-suffix,
   -clang-diagnostic-gnu-zero-variadic-macro-arguments,
-  -modernize-use-auto
+  -modernize-use-auto,
+  -readability-function-cognitive-complexity
 WarningsAsErrors: 'bugprone-*,performance-*'
 HeaderFilterRegex: 'include/qcdsl/.*'

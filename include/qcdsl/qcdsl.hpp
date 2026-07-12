@@ -6,5 +6,6 @@
 #include "qcdsl/ir/dag.hpp"
 #include "qcdsl/pass/pass.hpp"
 #include "qcdsl/pass/passes.hpp"
+#include "qcdsl/qasm/qasm3.hpp"
 #include "qcdsl/sim/statevector.hpp"
 #include "qcdsl/version.hpp"

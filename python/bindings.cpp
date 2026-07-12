@@ -177,6 +177,13 @@ PYBIND11_MODULE(_qcdsl, m) {
       .def("sweeps", &PassManager::sweeps)
       .def("__len__", &PassManager::size);
 
+  py::register_exception<QasmError>(m, "QasmError", PyExc_ValueError);
+
+  m.def("to_qasm3", &to_qasm3, py::arg("circuit"),
+        "Emit a circuit as OpenQASM 3.0 source.");
+  m.def("from_qasm3", &from_qasm3, py::arg("source"),
+        "Parse OpenQASM 3.0 source into a circuit. Raises QasmError.");
+
   m.def("simulate", &simulate<double>, py::arg("circuit"),
         "Simulate a circuit from the all-zero state.");
 }

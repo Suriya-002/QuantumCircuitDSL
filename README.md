@@ -53,11 +53,11 @@ nothing is listed here that does not have a test behind it.
 | Cross-validation against Qiskit on random circuits | done |
 | DAG IR (dependency graph, topological schedule) | done |
 | Passes: cancellation, rotation fusion, CX gate-set targeting | done |
+| OpenQASM 3.0 import / export (two-way Qiskit interop) | done |
 | Full single-qubit fusion (U gate + global phase) | planned |
-| OpenQASM 3.0 import / export | planned |
 | SIMD (AVX-512) + OpenMP gate kernels, benchmarks | planned |
 
-101 C++ tests, 231 Python tests, 96% line coverage and 100% function coverage
+115 C++ tests, 306 Python tests, 95% line coverage and 100% function coverage
 (gated at 90% in CI). The C++ suite is a GoogleTest *typed* suite -- the whole
 battery runs against both the `double` and the `float` instantiation, because a
 templated backend with one tested instantiation is a half-tested backend.
@@ -89,6 +89,24 @@ over-constrained IR computes the right answer, it just schedules badly. Only the
 depth cross-check catches it. Drop the dependency on a two-qubit gate's second
 wire and the state tests fail. Neither test alone is sufficient; together they
 admit exactly one edge set.
+
+## OpenQASM 3
+
+`to_qasm3` / `from_qasm3`: a tokeniser, a recursive-descent parser and an angle
+*expression* evaluator, because Qiskit writes `rz(pi/2) q[0];` as readily as it
+writes a float. Comments, barriers, both measurement spellings and the OpenQASM 2
+register syntax are all accepted; malformed input raises with a line number.
+
+Round-tripping through one's own parser proves nothing -- an emitter and a parser
+that share a private dialect will agree perfectly and still be unable to talk to
+anything else. Conformance is checked in **both** directions against Qiskit:
+
+```
+export:  qcdsl emits  ->  qiskit.qasm3.loads  ->  same state vector
+import:  qiskit.qasm3.dumps  ->  qcdsl parses  ->  same state vector
+```
+
+on randomly generated circuits, amplitude for amplitude.
 
 ## Optimisation
 
