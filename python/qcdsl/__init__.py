@@ -2,6 +2,8 @@
 
 from ._qcdsl import (  # noqa: F401
     Circuit,
+    Dag,
+    DagNode,
     Gate,
     GateKind,
     Statevector,
@@ -14,6 +16,8 @@ from ._qcdsl import (  # noqa: F401
 
 __all__ = [
     "Circuit",
+    "Dag",
+    "DagNode",
     "Gate",
     "GateKind",
     "Statevector",

@@ -13,6 +13,7 @@ add_executable(qcdsl_tests
   test_gate.cpp
   test_circuit.cpp
   test_statevector.cpp
+  test_dag.cpp
 )
 
 target_link_libraries(qcdsl_tests PRIVATE qcdsl::qcdsl GTest::gtest_main)

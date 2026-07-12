@@ -102,6 +102,38 @@ PYBIND11_MODULE(_qcdsl, m) {
                " dim=" + std::to_string(sv.dim()) + ">";
       });
 
+  py::class_<Dag::Node>(m, "DagNode")
+      .def_readonly("gate", &Dag::Node::gate)
+      .def_readonly("preds", &Dag::Node::preds)
+      .def_readonly("succs", &Dag::Node::succs);
+
+  py::class_<Dag>(m, "Dag")
+      .def(py::init<const Circuit&>(), py::arg("circuit"))
+      .def_property_readonly("num_qubits", &Dag::num_qubits)
+      .def("size", &Dag::size)
+      .def("num_edges", &Dag::num_edges)
+      .def("depth", &Dag::depth)
+      .def("node", &Dag::node, py::arg("id"),
+           py::return_value_policy::reference_internal)
+      .def("nodes", &Dag::nodes, py::return_value_policy::reference_internal)
+      .def("frontier", &Dag::frontier)
+      .def("layers", &Dag::layers)
+      .def("topological_order", &Dag::topological_order)
+      .def("random_topological_order", &Dag::random_topological_order,
+           py::arg("seed"))
+      .def("is_valid_schedule", &Dag::is_valid_schedule, py::arg("order"))
+      .def("to_circuit", py::overload_cast<>(&Dag::to_circuit, py::const_))
+      .def("to_circuit",
+           py::overload_cast<const std::vector<std::size_t>&>(&Dag::to_circuit,
+                                                              py::const_),
+           py::arg("order"))
+      .def("__len__", &Dag::size)
+      .def("__repr__", [](const Dag& d) {
+        return "<Dag nodes=" + std::to_string(d.size()) +
+               " edges=" + std::to_string(d.num_edges()) +
+               " depth=" + std::to_string(d.depth()) + ">";
+      });
+
   m.def("simulate", &simulate<double>, py::arg("circuit"),
         "Simulate a circuit from the all-zero state.");
 }

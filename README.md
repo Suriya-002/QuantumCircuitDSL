@@ -51,12 +51,12 @@ nothing is listed here that does not have a test behind it.
 | CMake + GoogleTest + pytest + CI + clang-tidy | done |
 | State-vector simulator (scalar reference) | done |
 | Cross-validation against Qiskit on random circuits | done |
-| DAG IR (dependency graph, topological schedule) | planned |
+| DAG IR (dependency graph, topological schedule) | done |
 | Passes: gate fusion, Clifford+T decomposition | planned |
 | OpenQASM 3.0 import / export | planned |
 | SIMD (AVX-512) + OpenMP gate kernels, benchmarks | planned |
 
-66 C++ tests, 109 Python tests, 97% line coverage and 100% function coverage
+79 C++ tests, 183 Python tests, 97% line coverage and 100% function coverage
 (gated at 90% in CI). The C++ suite is a GoogleTest *typed* suite -- the whole
 battery runs against both the `double` and the `float` instantiation, because a
 templated backend with one tested instantiation is a half-tested backend.
@@ -70,9 +70,24 @@ so it is checked against an independent implementation -- `qiskit.quantum_info.S
 circuits, compared amplitude for amplitude including global phase.
 
 This is not ceremony. Transpose the `Y` gate (`[[0,i],[-i,0]]` instead of
-`[[0,-i],[i,0]]`) and all 39 C++ tests still pass -- `Y * Y` is the identity
+`[[0,-i],[i,0]]`) and every C++ test still passes -- `Y * Y` is the identity
 under either sign convention, so nothing in a self-written suite pins it down.
 The Qiskit comparison fails 21 tests immediately.
+
+The DAG is pinned the same way, by two tests that fail in opposite directions:
+
+* `Dag::depth()` (longest path through the graph) must equal `Circuit::depth()`
+  (a walk over the wires). A **spurious** edge lengthens the critical path and
+  the two numbers diverge.
+* Every topological order of the DAG is a legal schedule, so all of them must
+  produce the same state vector. A **missing** edge lets some random schedule
+  run two dependent gates out of order, and the state changes.
+
+Serialise the DAG completely and the state tests still pass -- an
+over-constrained IR computes the right answer, it just schedules badly. Only the
+depth cross-check catches it. Drop the dependency on a two-qubit gate's second
+wire and the state tests fail. Neither test alone is sufficient; together they
+admit exactly one edge set.
 
 ## Build
 
