@@ -16,7 +16,7 @@ cmake --build "$BUILD" --parallel > /dev/null
 echo ok
 
 step "C++ tests"
-ctest --test-dir "$BUILD" --output-on-failure | tail -2
+ctest --test-dir "$BUILD" --output-on-failure | tail -n 30
 
 step "Python tests"
 PYTHONPATH="$BUILD/python" python3 -m pytest python/tests -q
@@ -28,13 +28,13 @@ echo clean
 
 step "clang-tidy"
 cmake -S "$SRC" -B "${BUILD}-tidy" -G Ninja -DCMAKE_BUILD_TYPE=Debug -DQCDSL_BUILD_PYTHON=OFF > /dev/null
-clang-tidy -p "${BUILD}-tidy" tests/test_gate.cpp tests/test_circuit.cpp
+clang-tidy -p "${BUILD}-tidy" tests/test_gate.cpp tests/test_circuit.cpp tests/test_statevector.cpp 2>/dev/null
 echo clean
 
 step "coverage (gate: 90%)"
 cmake -S "$SRC" -B "$COV" -G Ninja -DCMAKE_BUILD_TYPE=Debug -DQCDSL_COVERAGE=ON -DQCDSL_BUILD_PYTHON=OFF > /dev/null
 cmake --build "$COV" --parallel > /dev/null
 ctest --test-dir "$COV" > /dev/null
-gcovr --root "$SRC" --filter 'include/qcdsl/' --print-summary --fail-under-line 90 "$COV" | tail -4
+gcovr --root "$SRC" --filter 'include/qcdsl/' --print-summary --fail-under-line 90 "$COV" 2>/dev/null | tail -3
 
 printf '\nALL GREEN - safe to push\n'
