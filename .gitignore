@@ -1,0 +1,16 @@
+build/
+cmake-build-*/
+_deps/
+*.so
+*.o
+*.a
+compile_commands.json
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.cache/
+.vscode/
+.idea/
+perf.data*
+callgrind.out.*
