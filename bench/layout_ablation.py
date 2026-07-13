@@ -46,6 +46,8 @@ from __future__ import annotations
 import random
 import statistics
 
+import numpy as np
+
 import qcdsl
 from qcdsl import Circuit, CouplingMap, GateKind, SabreOptions, SabreRouter
 
@@ -76,9 +78,27 @@ TOPOLOGIES = {
     ),
 }
 
-N_CIRCUITS = 30
+N_CIRCUITS = 300
 N_GATES = 60
 RESTARTS = 8  # C, D, *and Qiskit* all get exactly the same budget
+
+
+def paired_interval(ours, theirs, reps: int = 4000):
+    """Bootstrap 95% interval on the PAIRED difference (ours - Qiskit).
+
+    Thirty circuits has a standard error of roughly +/-5% on the mean, and the
+    effects worth arguing about here are 2-6%. Measured: the same code and the
+    same topology scored 1.07x on one 30-circuit sample and 0.99x on another.
+    A mean without an interval is not a measurement, it is an anecdote -- and an
+    afternoon was spent chasing gaps that lived entirely inside the noise.
+
+    If the interval straddles zero, we cannot claim to beat Qiskit. Or to lose
+    to it.
+    """
+    d = np.asarray(ours, float) - np.asarray(theirs, float)
+    rng = np.random.default_rng(0)
+    means = [d[rng.integers(0, len(d), len(d))].mean() for _ in range(reps)]
+    return float(np.percentile(means, 2.5)), float(np.percentile(means, 97.5))
 
 
 def synth(n: int, m: int, seed: int):
@@ -146,7 +166,7 @@ def main() -> None:
     print(f"{N_CIRCUITS} random circuits x {N_GATES} gates, "
           f"{RESTARTS} restarts for C and D. Mean SWAPs.\n")
     print(f"{'topology':<9} {'A ident':>8} {'B descent':>10} {'C restart':>10} "
-          f"{'D rand-only':>12} {'Qiskit':>8} | {'C vs Qk':>8} {'C vs D':>7}")
+          f"{'D rand-only':>12} {'Qiskit':>8} | {'C vs Qk':>8}  95% CI on paired diff")
 
     for name, (cm, edges, n) in TOPOLOGIES.items():
         a, b, c, d, qk = [], [], [], [], []
@@ -170,10 +190,15 @@ def main() -> None:
 
         m = statistics.mean
         qk_m = m(qk) if qk else float("nan")
+        if qk:
+            lo, hi = paired_interval(c, qk)
+            verdict = "TIE" if lo < 0 < hi else ("LOSE" if lo > 0 else "WIN")
+            ci = f"[{lo:+.2f},{hi:+.2f}] {verdict}"
+        else:
+            ci = ""
         print(f"{name:<9} {m(a):>8.1f} {m(b):>10.1f} {m(c):>10.1f} "
               f"{m(d):>12.1f} {qk_m:>8.1f} | "
-              f"{m(c) / qk_m if qk else float('nan'):>7.2f}x "
-              f"{m(c) / max(m(d), 1e-9):>6.2f}x")
+              f"{m(c) / qk_m if qk else float('nan'):>7.3f}x  {ci}")
 
     print("\nWHAT THIS SHOWS")
     print("  A -> B : the SABRE descent is worth ~25-30%. It earns its keep.")

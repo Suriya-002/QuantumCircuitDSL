@@ -30,6 +30,8 @@ from __future__ import annotations
 import os
 import random
 import statistics
+
+import numpy as np
 import time
 
 from qcdsl import Circuit, CouplingMap, GateKind, SabreOptions, SabreRouter
@@ -61,7 +63,7 @@ TOPOLOGIES = {
     ),
 }
 
-N_CIRCUITS = 30
+N_CIRCUITS = 300
 N_GATES = 60
 BUDGET = 8  # identical for both sides: 8 layout restarts, 8 routing trials
 

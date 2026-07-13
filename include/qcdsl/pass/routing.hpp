@@ -362,7 +362,7 @@ class SabreRouter {
             "sabre failed to make progress; the coupling map may be malformed");
       }
 
-      const auto [a, b] = best_swap(dag, front, pi, inv, decay, rng);
+      const auto [a, b] = best_swap(dag, front, indeg, pi, inv, decay, rng);
       out.circuit.add(GateKind::SWAP, {a, b});
       ++out.swaps_added;
 
@@ -397,26 +397,41 @@ class SabreRouter {
     out.add(Gate(g.kind, phys, g.param));
   }
 
-  /// The next `lookahead_size` two-qubit gates beyond the front layer, in
-  /// breadth-first order. These are the gates the router should avoid making
-  /// harder while it fixes the ones in front of it.
+  /// The gates that would execute NEXT, once the front layer clears -- up to
+  /// `lookahead_size` two-qubit gates. These are the gates the router should
+  /// avoid making harder while it fixes the ones in front of it.
+  ///
+  /// A gate joins this set only when its LAST remaining predecessor has been
+  /// traversed. That is the whole subtlety, and getting it wrong is expensive.
+  ///
+  /// The obvious implementation -- breadth-first search from the front layer,
+  /// marking each gate the first time you reach it -- builds a BFS BALL, not a
+  /// topological wavefront. It admits gates that are still waiting on other
+  /// predecessors down a different branch of the DAG, and those gates may be
+  /// many layers from executing. The lookahead term then spends its budget
+  /// optimising qubit distances for gates that will not run for a long time.
+  ///
+  /// The symptom is diagnostic: with the BFS-ball version, this router's best
+  /// `lookahead_size` was 10, and raising it to 20 made routing WORSE -- while
+  /// Qiskit runs happily at 20, because its extended set is a true wavefront. A
+  /// lookahead window that gets worse as you widen it is not a window, it is a
+  /// leak.
   [[nodiscard]] std::vector<std::size_t> extended_set(
-      const Dag& dag, const std::vector<std::size_t>& front) const {
+      const Dag& dag, const std::vector<std::size_t>& front,
+      std::vector<std::size_t> remaining) const {
     std::vector<std::size_t> out;
-    std::vector<bool> seen(dag.size(), false);
     std::vector<std::size_t> frontier = front;
-    for (const std::size_t id : front) {
-      seen[id] = true;
-    }
 
     while (!frontier.empty() && out.size() < opt_.lookahead_size) {
       std::vector<std::size_t> next;
       for (const std::size_t id : frontier) {
         for (const std::size_t s : dag.node(id).succs) {
-          if (seen[s]) {
+          // Decrement, and admit only on the last predecessor. `remaining` is a
+          // copy of the router's live in-degree, so gates already executed are
+          // already accounted for and this cannot underflow.
+          if (--remaining[s] != 0) {
             continue;
           }
-          seen[s] = true;
           next.push_back(s);
           if (dag.node(s).gate.qubits.size() == 2) {
             out.push_back(s);
@@ -451,8 +466,9 @@ class SabreRouter {
 
   [[nodiscard]] std::pair<Qubit, Qubit> best_swap(
       const Dag& dag, const std::vector<std::size_t>& front,
-      const std::vector<Qubit>& pi, const std::vector<Qubit>& inv,
-      const std::vector<double>& decay, std::mt19937_64& rng) const {
+      const std::vector<std::size_t>& indeg, const std::vector<Qubit>& pi,
+      const std::vector<Qubit>& inv, const std::vector<double>& decay,
+      std::mt19937_64& rng) const {
     // Only SWAPs that touch a qubit the front layer is waiting on can possibly
     // help. Everything else moves an irrelevant qubit.
     std::vector<bool> involved(device_.num_qubits(), false);
@@ -464,7 +480,7 @@ class SabreRouter {
       }
     }
 
-    const std::vector<std::size_t> ext = extended_set(dag, front);
+    const std::vector<std::size_t> ext = extended_set(dag, front, indeg);
 
     double best_score = std::numeric_limits<double>::infinity();
     std::vector<std::pair<Qubit, Qubit>> best;
