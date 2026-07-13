@@ -61,24 +61,30 @@ try:
 except ImportError:  # pragma: no cover
     HAVE_QISKIT = False
 
+def _grid_edges(rows: int, cols: int):
+    e = []
+    for i in range(rows):
+        for j in range(cols):
+            q = i * cols + j
+            if j + 1 < cols:
+                e.append((q, q + 1))
+            if i + 1 < rows:
+                e.append((q, q + cols))
+    return e
+
+
 TOPOLOGIES = {
-    "line7": (CouplingMap.line(7), [(i, i + 1) for i in range(6)], 7),
-    "ring7": (CouplingMap.ring(7), [(i, i + 1) for i in range(6)] + [(6, 0)], 7),
-    "grid2x4": (
-        CouplingMap.grid(2, 4),
-        [(0, 1), (0, 4), (1, 2), (1, 5), (2, 3), (2, 6), (3, 7),
-         (4, 5), (5, 6), (6, 7)],
-        8,
-    ),
-    "grid3x3": (
-        CouplingMap.grid(3, 3),
-        [(0, 1), (1, 2), (3, 4), (4, 5), (6, 7), (7, 8),
-         (0, 3), (3, 6), (1, 4), (4, 7), (2, 5), (5, 8)],
-        9,
-    ),
+    "line7": (CouplingMap.line(7), [(i, i + 1) for i in range(6)], 7, 60),
+    "ring7": (CouplingMap.ring(7), [(i, i + 1) for i in range(6)] + [(6, 0)], 7, 60),
+    "line12": (CouplingMap.line(12), [(i, i + 1) for i in range(11)], 12, 120),
+    "ring12": (CouplingMap.ring(12),
+               [(i, i + 1) for i in range(11)] + [(11, 0)], 12, 120),
+    "grid3x3": (CouplingMap.grid(3, 3), _grid_edges(3, 3), 9, 60),
+    "grid4x4": (CouplingMap.grid(4, 4), _grid_edges(4, 4), 16, 150),
+    "grid5x5": (CouplingMap.grid(5, 5), _grid_edges(5, 5), 25, 250),
 }
 
-N_CIRCUITS = 300
+N_CIRCUITS = 120
 N_GATES = 60
 RESTARTS = 8  # C, D, *and Qiskit* all get exactly the same budget
 
@@ -168,10 +174,10 @@ def main() -> None:
     print(f"{'topology':<9} {'A ident':>8} {'B descent':>10} {'C restart':>10} "
           f"{'D rand-only':>12} {'Qiskit':>8} | {'C vs Qk':>8}  95% CI on paired diff")
 
-    for name, (cm, edges, n) in TOPOLOGIES.items():
+    for name, (cm, edges, n, ngates) in TOPOLOGIES.items():
         a, b, c, d, qk = [], [], [], [], []
         for i in range(N_CIRCUITS):
-            ours, theirs = synth(n, N_GATES, seed=1000 + i)
+            ours, theirs = synth(n, ngates, seed=1000 + i)
 
             r_plain = SabreRouter(cm, opts(seed=i))
             a.append(r_plain.route(ours).swaps_added)

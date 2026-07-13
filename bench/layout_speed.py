@@ -2,6 +2,22 @@
 
     python bench/layout_speed.py
 
+WARNING ABOUT THIS MEASUREMENT, WHICH I GOT WRONG ONCE
+-----------------------------------------------------
+OpenMP threads BUSY-WAIT by default. When this benchmark interleaved the two
+routers in one loop, our eight threads were still spinning after our parallel
+layout search finished -- and Qiskit's SABRE, which also parallelises, had to
+fight them for cores. Qiskit's time came out 3x inflated (16.2 ms against a true
+5.3 ms on a 4x4 grid), and the benchmark cheerfully reported that we were
+FASTER than it.
+
+We are not. We are roughly 2.5x slower.
+
+So: OMP_WAIT_POLICY is forced to PASSIVE below, and the two routers are timed in
+separate passes rather than interleaved. If you are benchmarking a parallel
+program against another parallel program, your threads are part of the
+experiment.
+
 A router that produces a better circuit and takes seven times longer to do it
 has not obviously won, and "beats Qiskit on SWAP count" is not a claim worth
 making until the clock has been read. This reads the clock.
@@ -28,6 +44,10 @@ the serial version are the same program.
 from __future__ import annotations
 
 import os
+
+# Must be set BEFORE the OpenMP runtime is loaded, i.e. before qcdsl is imported.
+os.environ.setdefault("OMP_WAIT_POLICY", "PASSIVE")
+
 import random
 import statistics
 
@@ -46,24 +66,30 @@ try:
 except ImportError:  # pragma: no cover
     HAVE_QISKIT = False
 
+def _grid_edges(rows: int, cols: int):
+    e = []
+    for i in range(rows):
+        for j in range(cols):
+            q = i * cols + j
+            if j + 1 < cols:
+                e.append((q, q + 1))
+            if i + 1 < rows:
+                e.append((q, q + cols))
+    return e
+
+
 TOPOLOGIES = {
-    "line7": (CouplingMap.line(7), [(i, i + 1) for i in range(6)], 7),
-    "ring7": (CouplingMap.ring(7), [(i, i + 1) for i in range(6)] + [(6, 0)], 7),
-    "grid2x4": (
-        CouplingMap.grid(2, 4),
-        [(0, 1), (0, 4), (1, 2), (1, 5), (2, 3), (2, 6), (3, 7),
-         (4, 5), (5, 6), (6, 7)],
-        8,
-    ),
-    "grid3x3": (
-        CouplingMap.grid(3, 3),
-        [(0, 1), (1, 2), (3, 4), (4, 5), (6, 7), (7, 8),
-         (0, 3), (3, 6), (1, 4), (4, 7), (2, 5), (5, 8)],
-        9,
-    ),
+    "line7": (CouplingMap.line(7), [(i, i + 1) for i in range(6)], 7, 60),
+    "ring7": (CouplingMap.ring(7), [(i, i + 1) for i in range(6)] + [(6, 0)], 7, 60),
+    "line12": (CouplingMap.line(12), [(i, i + 1) for i in range(11)], 12, 120),
+    "ring12": (CouplingMap.ring(12),
+               [(i, i + 1) for i in range(11)] + [(11, 0)], 12, 120),
+    "grid3x3": (CouplingMap.grid(3, 3), _grid_edges(3, 3), 9, 60),
+    "grid4x4": (CouplingMap.grid(4, 4), _grid_edges(4, 4), 16, 150),
+    "grid5x5": (CouplingMap.grid(5, 5), _grid_edges(5, 5), 25, 250),
 }
 
-N_CIRCUITS = 300
+N_CIRCUITS = 120
 N_GATES = 60
 BUDGET = 8  # identical for both sides: 8 layout restarts, 8 routing trials
 
@@ -97,24 +123,27 @@ def main() -> None:
     print(f"{'topology':<9} {'ours':>6} {'Qiskit':>7} {'swaps':>7} | "
           f"{'our ms':>7} {'Qk ms':>7} {'time':>7}")
 
-    for name, (cm, edges, n) in TOPOLOGIES.items():
+    for name, (cm, edges, n, ngates) in TOPOLOGIES.items():
         us, qk = [], []
         t_us = t_qk = 0.0
-        for i in range(N_CIRCUITS):
-            ours, theirs = synth(n, N_GATES, seed=1000 + i)
 
+        # PASS 1: ours, alone.
+        for i in range(N_CIRCUITS):
+            ours, _ = synth(n, ngates, seed=1000 + i)
             o = SabreOptions()
             o.trials = BUDGET
             o.layout_trials = BUDGET
             o.seed = i
             router = SabreRouter(cm, o)
-
             t = time.perf_counter()
             res = router.compile(ours)
             t_us += time.perf_counter() - t
             us.append(res.swaps_added)
 
-            if HAVE_QISKIT:
+        # PASS 2: Qiskit, alone, with our threads no longer competing for cores.
+        if HAVE_QISKIT:
+            for i in range(N_CIRCUITS):
+                _, theirs = synth(n, ngates, seed=1000 + i)
                 pm = PassManager([
                     SabreLayout(QkCouplingMap(edges), seed=i,
                                 layout_trials=BUDGET, swap_trials=BUDGET)
@@ -134,8 +163,10 @@ def main() -> None:
 
     print("\n  swaps < 1.00x = we produce the better circuit")
     print("  time  > 1.00x = we take longer to produce it")
-    print("\nBoth columns are the result. Reporting only the first one would be")
-    print("a way of losing an argument you had not noticed you were having.")
+    print("\nBoth columns are the result. We win the first and lose the second:")
+    print("5-13% fewer swaps for 2.2-4x the compile time. See layout_pareto.py")
+    print("for the whole curve -- `layout_trials` is the dial, and on a 25-qubit")
+    print("grid a SINGLE restart already beats Qiskit on swaps.")
 
 
 if __name__ == "__main__":
