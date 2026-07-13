@@ -174,8 +174,8 @@ class SabreRouter {
 
       // The DESCENT is seeded differently per trial -- that is where the
       // diversity comes from. The SCORE is not.
-      Layout cand = refine_layout(qc, std::move(start), iterations,
-                                  opt_.seed + t * 977U);
+      Layout cand =
+          refine_layout(qc, std::move(start), iterations, opt_.seed + t * 977U);
       const std::size_t swaps = route(qc, cand).swaps_added;
       if (swaps < best_swaps) {
         best_swaps = swaps;
