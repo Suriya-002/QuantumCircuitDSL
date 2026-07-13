@@ -114,6 +114,9 @@ class SabreRouter {
     if (opt_.trials == 0) {
       throw std::invalid_argument("trials must be at least 1");
     }
+    if (opt_.layout_trials == 0) {
+      throw std::invalid_argument("layout_trials must be at least 1");
+    }
   }
 
   [[nodiscard]] const CouplingMap& device() const noexcept { return device_; }
@@ -154,46 +157,90 @@ class SabreRouter {
   /// is worth against Qiskit.
   [[nodiscard]] Layout find_layout(const Circuit& qc,
                                    std::size_t iterations = 3) const {
-    // Trial 0 is the identity: the layout a caller gets for free. Anything we
-    // return must be at least as good as it.
+    const std::size_t n = qc.num_qubits();
+    const std::size_t trials = opt_.layout_trials;
+
+    std::vector<Layout> cand(trials);
+    std::vector<std::size_t> score(trials);
+
+    // The restarts are independent BY CONSTRUCTION: each has its own starting
+    // permutation, its own descent, and its own score, and none of them touch
+    // each other. So they run in parallel. Qiskit parallelises its layout
+    // trials too, which is a large part of why its transpiler is fast.
+    //
+    // Each trial's RNG is seeded from its INDEX, not drawn from a shared
+    // stream. A shared stream would make the answer depend on the order the
+    // threads happened to run in, which is a bug that only shows up on someone
+    // else's machine.
     //
     // EVERY candidate is scored with `route`, the exact procedure the caller
-    // will use on the winner. Scoring with anything else is a trap: an earlier
-    // version scored each candidate under its own routing seed and then routed
-    // the winner under a different one, so the number used to CHOOSE was not
-    // the number you GOT -- and adding restarts could make the result worse.
-    // A test caught it. Selection and evaluation must be the same function.
-    Layout best = refine_layout(qc, trivial_layout(qc.num_qubits()), iterations,
-                                opt_.seed);
-    std::size_t best_swaps = route(qc, best).swaps_added;
+    // will use on the winner. An earlier version scored each candidate under
+    // its own routing seed and then routed the winner under a different one, so
+    // the number used to CHOOSE was not the number you GOT -- and adding
+    // restarts could make the result worse. A test caught it.
+#ifdef _OPENMP
+#pragma omp parallel for schedule(dynamic)
+#endif
+    for (std::ptrdiff_t t = 0; t < static_cast<std::ptrdiff_t>(trials); ++t) {
+      const auto ut = static_cast<std::uint64_t>(t);
+      Layout start = trivial_layout(n);
+      if (t > 0) {
+        // Trial 0 stays the identity: the layout a caller gets for free.
+        // Anything returned must be at least as good as it.
+        std::mt19937_64 rng(opt_.seed + ut * 7919U);
+        std::shuffle(start.begin(), start.end(), rng);
+      }
+      const std::size_t i = static_cast<std::size_t>(t);
+      cand[i] = refine_layout(qc, std::move(start), iterations,
+                              opt_.seed + ut * 977U);
+      score[i] = route(qc, cand[i]).swaps_added;
+    }
 
-    std::mt19937_64 rng(opt_.seed);
-    for (std::size_t t = 1; t < opt_.layout_trials; ++t) {
-      Layout start = trivial_layout(qc.num_qubits());
-      std::shuffle(start.begin(), start.end(), rng);
-
-      // The DESCENT is seeded differently per trial -- that is where the
-      // diversity comes from. The SCORE is not.
-      Layout cand =
-          refine_layout(qc, std::move(start), iterations, opt_.seed + t * 977U);
-      const std::size_t swaps = route(qc, cand).swaps_added;
-      if (swaps < best_swaps) {
-        best_swaps = swaps;
-        best = std::move(cand);
+    // Ties go to the lowest index, so trial 0 -- the identity -- wins them.
+    std::size_t best = 0;
+    for (std::size_t t = 1; t < trials; ++t) {
+      if (score[t] < score[best]) {
+        best = t;
       }
     }
-    return best;
+    return cand[best];
   }
 
   /// The forward-reverse descent, from a given starting layout.
+  ///
+  /// Returns the BEST layout the descent visited, not the last one.
+  ///
+  /// The distinction is not pedantic. The forward-reverse iteration is NOT
+  /// monotone -- it can, and does, wander off a good layout onto a worse one.
+  /// Measured on 40 random circuits (bench/layout_ablation.py):
+  ///
+  ///     grid2x4   iteration 2: 12.7 swaps   iteration 3: 13.4 swaps
+  ///     ring7     iteration 2: 16.4 swaps   iteration 3: 16.7 swaps
+  ///
+  /// Returning the final iterate therefore throws away a layout the algorithm
+  /// had already found. Qiskit's SabreLayout has the same shape (run
+  /// max_iterations, take the last), so this is not a deviation from the
+  /// reference so much as a free correction to it.
+  ///
+  /// The descent also SATURATES after one or two iterations on every topology
+  /// tested, so the default of 3 is already past the point of return.
   [[nodiscard]] Layout refine_layout(const Circuit& qc, Layout layout,
                                      std::size_t iterations,
                                      std::uint64_t seed) const {
+    Layout best = layout;
+    std::size_t best_swaps = route_once(qc, best, seed).swaps_added;
+
     for (std::size_t i = 0; i < iterations; ++i) {
       layout = route_once(qc, layout, seed + i).final_layout;
       layout = route_once(reverse(qc), layout, seed + i).final_layout;
+
+      const std::size_t swaps = route_once(qc, layout, seed).swaps_added;
+      if (swaps < best_swaps) {
+        best_swaps = swaps;
+        best = layout;
+      }
     }
-    return layout;
+    return best;
   }
 
   /// Layout, then route. This is the whole compiler back end in one call.
