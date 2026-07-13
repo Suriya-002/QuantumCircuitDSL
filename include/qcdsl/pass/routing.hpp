@@ -47,9 +47,27 @@ struct SabreOptions {
   std::size_t lookahead_size = 20;
   /// Discourages the router from repeatedly moving the same qubit.
   double decay_step = 0.001;
-  /// Best-of-N over random tie-breaks. SABRE is a heuristic; running it more
-  /// than once and keeping the best answer is the cheapest real improvement.
+  /// Best-of-N over random TIE-BREAKS, from a fixed starting layout. SABRE is a
+  /// heuristic; running it more than once and keeping the best answer is the
+  /// cheapest real improvement.
   std::size_t trials = 1;
+
+  /// Best-of-N over random STARTING PERMUTATIONS for the layout search.
+  ///
+  /// This is not the same knob as `trials`, and confusing the two is what kept
+  /// this router 5-27% behind Qiskit's. `trials` re-rolls the coin flips inside
+  /// one run; every run still begins from the identity layout, so they all
+  /// descend into the SAME basin and disagree only about the details. More
+  /// trials therefore polish one local optimum and never look for a better one.
+  ///
+  /// `layout_trials` restarts the search from a different random permutation
+  /// each time, landing in a DIFFERENT basin, and keeps whichever bottoms out
+  /// lowest. That is what Qiskit's SabreLayout does (its `layout_trials`
+  /// defaults to the CPU count), and it is the entire source of its advantage.
+  ///
+  /// Trial 0 always starts from the identity, so raising this can only help.
+  std::size_t layout_trials = 1;
+
   std::uint64_t seed = 0;
 };
 
@@ -127,12 +145,53 @@ class SabreRouter {
   /// mapping for its reverse: the router has already discovered which qubits
   /// want to be near which. Two passes cost nothing and typically remove a
   /// large fraction of the SWAPs an identity layout would need.
+  ///
+  /// The refinement is a DESCENT: it improves whatever layout you hand it, but
+  /// it cannot leave the basin that layout sits in. Starting always from the
+  /// identity therefore explores exactly one basin, however many times you run
+  /// it. `opt_.layout_trials` restarts from random permutations and keeps the
+  /// best -- see SabreOptions, and see bench/layout_ablation.cpp for what that
+  /// is worth against Qiskit.
   [[nodiscard]] Layout find_layout(const Circuit& qc,
                                    std::size_t iterations = 3) const {
-    Layout layout = trivial_layout(qc.num_qubits());
+    // Trial 0 is the identity: the layout a caller gets for free. Anything we
+    // return must be at least as good as it.
+    //
+    // EVERY candidate is scored with `route`, the exact procedure the caller
+    // will use on the winner. Scoring with anything else is a trap: an earlier
+    // version scored each candidate under its own routing seed and then routed
+    // the winner under a different one, so the number used to CHOOSE was not
+    // the number you GOT -- and adding restarts could make the result worse.
+    // A test caught it. Selection and evaluation must be the same function.
+    Layout best = refine_layout(qc, trivial_layout(qc.num_qubits()), iterations,
+                                opt_.seed);
+    std::size_t best_swaps = route(qc, best).swaps_added;
+
+    std::mt19937_64 rng(opt_.seed);
+    for (std::size_t t = 1; t < opt_.layout_trials; ++t) {
+      Layout start = trivial_layout(qc.num_qubits());
+      std::shuffle(start.begin(), start.end(), rng);
+
+      // The DESCENT is seeded differently per trial -- that is where the
+      // diversity comes from. The SCORE is not.
+      Layout cand = refine_layout(qc, std::move(start), iterations,
+                                  opt_.seed + t * 977U);
+      const std::size_t swaps = route(qc, cand).swaps_added;
+      if (swaps < best_swaps) {
+        best_swaps = swaps;
+        best = std::move(cand);
+      }
+    }
+    return best;
+  }
+
+  /// The forward-reverse descent, from a given starting layout.
+  [[nodiscard]] Layout refine_layout(const Circuit& qc, Layout layout,
+                                     std::size_t iterations,
+                                     std::uint64_t seed) const {
     for (std::size_t i = 0; i < iterations; ++i) {
-      layout = route_once(qc, layout, opt_.seed + i).final_layout;
-      layout = route_once(reverse(qc), layout, opt_.seed + i).final_layout;
+      layout = route_once(qc, layout, seed + i).final_layout;
+      layout = route_once(reverse(qc), layout, seed + i).final_layout;
     }
     return layout;
   }

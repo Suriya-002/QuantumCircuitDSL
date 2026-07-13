@@ -204,6 +204,7 @@ PYBIND11_MODULE(_qcdsl, m) {
       .def_readwrite("lookahead_size", &SabreOptions::lookahead_size)
       .def_readwrite("decay_step", &SabreOptions::decay_step)
       .def_readwrite("trials", &SabreOptions::trials)
+      .def_readwrite("layout_trials", &SabreOptions::layout_trials)
       .def_readwrite("seed", &SabreOptions::seed);
 
   py::class_<RoutingResult>(m, "RoutingResult")

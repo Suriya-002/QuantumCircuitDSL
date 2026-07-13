@@ -247,6 +247,81 @@ TEST(Routing, MoreTrialsNeverMakeItWorse) {
   EXPECT_LE(s8, s1);
 }
 
+TEST(Routing, RandomLayoutRestartsNeverMakeItWorse) {
+  // Trial 0 of the layout search starts from the identity, so whatever the
+  // random restarts turn up, the answer cannot be worse than searching from the
+  // identity alone. If this ever fails, the best-of-N bookkeeping is wrong.
+  const CouplingMap device = CouplingMap::grid(3, 3);
+  for (std::uint64_t seed = 0; seed < 12; ++seed) {
+    const Circuit qc = random_circuit(9, 40, seed);
+
+    SabreRouter::Options one;
+    one.layout_trials = 1;
+    one.seed = seed;
+
+    SabreRouter::Options many = one;
+    many.layout_trials = 8;
+
+    const std::size_t few = SabreRouter(device, one).compile(qc).swaps_added;
+    const std::size_t lots = SabreRouter(device, many).compile(qc).swaps_added;
+    EXPECT_LE(lots, few) << "restarting the layout search made it worse";
+  }
+}
+
+TEST(Routing, RandomLayoutRestartsStillProduceALegalCircuit) {
+  // A restarted search hands back a layout that is NOT the identity. The routed
+  // circuit still has to be a permutation of the logical qubits and still has
+  // to respect the coupling map -- a faster answer that does not run is not an
+  // answer.
+  const CouplingMap device = CouplingMap::grid(3, 3);
+  SabreRouter::Options opt;
+  opt.layout_trials = 8;
+  opt.trials = 4;
+  const SabreRouter router(device, opt);
+
+  const Circuit qc = random_circuit(9, 40, 7);
+  const auto r = router.compile(qc);
+
+  EXPECT_TRUE(router.respects_device(r.circuit));
+
+  auto sorted = r.initial_layout;
+  std::sort(sorted.begin(), sorted.end());
+  for (std::size_t i = 0; i < sorted.size(); ++i) {
+    EXPECT_EQ(sorted[i], i) << "the initial layout is not a permutation";
+  }
+}
+
+TEST(Routing, LayoutTrialsAndSwapTrialsAreDifferentKnobs) {
+  // The distinction that cost this router 5-27% against Qiskit. `trials`
+  // re-rolls tie-breaks from a FIXED start, so every run descends into the same
+  // basin. `layout_trials` restarts from a different permutation and can reach
+  // a different basin. Raising the first is not a substitute for raising the
+  // second, and on a grid the difference is large.
+  const CouplingMap device = CouplingMap::grid(3, 3);
+
+  std::size_t tie_break_wins = 0;
+  std::size_t restart_wins = 0;
+  for (std::uint64_t seed = 0; seed < 12; ++seed) {
+    const Circuit qc = random_circuit(9, 40, seed);
+
+    SabreRouter::Options tie_breaks;  // 8x the work, same starting layout
+    tie_breaks.trials = 8;
+    tie_breaks.layout_trials = 1;
+    tie_breaks.seed = seed;
+
+    SabreRouter::Options restarts;  // 8x the work, 8 different starting layouts
+    restarts.trials = 1;
+    restarts.layout_trials = 8;
+    restarts.seed = seed;
+
+    tie_break_wins += SabreRouter(device, tie_breaks).compile(qc).swaps_added;
+    restart_wins += SabreRouter(device, restarts).compile(qc).swaps_added;
+  }
+  EXPECT_LT(restart_wins, tie_break_wins)
+      << "on a grid, spending the budget on restarts must beat spending it on "
+         "tie-breaks -- see bench/layout_ablation.py";
+}
+
 TEST(Routing, RejectsCircuitsWiderThanTheDevice) {
   const SabreRouter router{CouplingMap::line(3)};
   EXPECT_THROW((void)router.route(Circuit(5)), std::invalid_argument);
