@@ -177,6 +177,69 @@ PYBIND11_MODULE(_qcdsl, m) {
       .def("sweeps", &PassManager::sweeps)
       .def("__len__", &PassManager::size);
 
+  py::class_<CouplingMap>(m, "CouplingMap")
+      .def(py::init<std::size_t, const std::vector<std::pair<Qubit, Qubit>>&>(),
+           py::arg("num_qubits"), py::arg("edges"))
+      .def_static("line", &CouplingMap::line, py::arg("n"))
+      .def_static("ring", &CouplingMap::ring, py::arg("n"))
+      .def_static("grid", &CouplingMap::grid, py::arg("rows"), py::arg("cols"))
+      .def_static("all_to_all", &CouplingMap::all_to_all, py::arg("n"))
+      .def_property_readonly("num_qubits", &CouplingMap::num_qubits)
+      .def("num_edges", &CouplingMap::num_edges)
+      .def("edges", &CouplingMap::edges)
+      .def("neighbours", &CouplingMap::neighbours, py::arg("qubit"))
+      .def("degree", &CouplingMap::degree, py::arg("qubit"))
+      .def("are_connected", &CouplingMap::are_connected, py::arg("a"),
+           py::arg("b"))
+      .def("distance", &CouplingMap::distance, py::arg("a"), py::arg("b"))
+      .def("is_connected", &CouplingMap::is_connected)
+      .def("__repr__", [](const CouplingMap& c) {
+        return "<CouplingMap qubits=" + std::to_string(c.num_qubits()) +
+               " edges=" + std::to_string(c.num_edges()) + ">";
+      });
+
+  py::class_<SabreOptions>(m, "SabreOptions")
+      .def(py::init<>())
+      .def_readwrite("lookahead_weight", &SabreOptions::lookahead_weight)
+      .def_readwrite("lookahead_size", &SabreOptions::lookahead_size)
+      .def_readwrite("decay_step", &SabreOptions::decay_step)
+      .def_readwrite("trials", &SabreOptions::trials)
+      .def_readwrite("seed", &SabreOptions::seed);
+
+  py::class_<RoutingResult>(m, "RoutingResult")
+      .def_readonly("circuit", &RoutingResult::circuit)
+      .def_readonly("initial_layout", &RoutingResult::initial_layout)
+      .def_readonly("final_layout", &RoutingResult::final_layout)
+      .def_readonly("swaps_added", &RoutingResult::swaps_added)
+      .def("__repr__", [](const RoutingResult& r) {
+        return "<RoutingResult swaps=" + std::to_string(r.swaps_added) +
+               " gates=" + std::to_string(r.circuit.size()) + ">";
+      });
+
+  py::class_<SabreRouter>(m, "SabreRouter")
+      .def(py::init<CouplingMap, SabreOptions>(), py::arg("device"),
+           py::arg("options") = SabreOptions())
+      .def("device", &SabreRouter::device,
+           py::return_value_policy::reference_internal)
+      .def("route",
+           py::overload_cast<const Circuit&>(&SabreRouter::route, py::const_),
+           py::arg("circuit"))
+      .def("route",
+           py::overload_cast<const Circuit&, const Layout&>(&SabreRouter::route,
+                                                            py::const_),
+           py::arg("circuit"), py::arg("initial_layout"))
+      .def("find_layout", &SabreRouter::find_layout, py::arg("circuit"),
+           py::arg("iterations") = 3)
+      .def("compile", &SabreRouter::compile, py::arg("circuit"))
+      .def("respects_device", &SabreRouter::respects_device, py::arg("circuit"))
+      .def("trivial_layout", &SabreRouter::trivial_layout,
+           py::arg("num_logical"));
+
+  m.def("permute_index", &permute_index, py::arg("index"),
+        py::arg("final_layout"),
+        "Where amplitude `index` of the unrouted state vector lands in the "
+        "routed one.");
+
   py::register_exception<QasmError>(m, "QasmError", PyExc_ValueError);
 
   m.def("to_qasm3", &to_qasm3, py::arg("circuit"),

@@ -1,6 +1,6 @@
 # qcdsl
 
-[![ci](https://github.com/Suriya-002/QuantumCircuitDSL/actions/workflows/ci.yml/badge.svg)](https://github.com/Suriya-002/QuantumCircuitDSL/actions/workflows/ci.yml)
+[![ci](https://github.com/USERNAME/quantum-circuit-dsl/actions/workflows/ci.yml/badge.svg)](https://github.com/USERNAME/quantum-circuit-dsl/actions/workflows/ci.yml)
 
 A quantum circuit **compiler** in C++17: a DAG intermediate representation,
 optimisation passes over that IR, a SIMD state-vector backend to check the
@@ -55,10 +55,11 @@ nothing is listed here that does not have a test behind it.
 | Passes: cancellation, rotation fusion, CX gate-set targeting | done |
 | OpenQASM 3.0 import / export (two-way Qiskit interop) | done |
 | SIMD (AVX-512) + OpenMP gate kernels, benchmarks | done |
+| Layout + routing (SABRE) against a device coupling map | done |
 | Full single-qubit fusion (U gate + global phase) | planned |
 | Cache-blocked multi-gate kernel (kill the bandwidth wall) | planned |
 
-124 C++ tests, 306 Python tests, 95% line coverage and 100% function coverage
+140 C++ tests, 333 Python tests, 96% line coverage and 100% function coverage
 (gated at 90% in CI). The C++ suite is a GoogleTest *typed* suite -- the whole
 battery runs against both the `double` and the `float` instantiation, because a
 templated backend with one tested instantiation is a half-tested backend.
@@ -144,6 +145,72 @@ not a regression. `DecomposeToCx` turns one `CZ` into three gates and one `SWAP`
 into three; on a circuit with nothing to cancel there is nothing to pay for it.
 Decomposition is gate-set targeting, not optimisation, and hardware compliance
 has a price. Reporting only the flattering workload would hide that.
+
+## Layout and routing
+
+Everything above this line assumes a machine where any qubit can talk to any
+other. No such machine exists. On real hardware `cx q[0], q[17]` is not an
+instruction -- it is a request, and the compiler has to satisfy it by physically
+walking those two qubits next to each other with SWAPs.
+
+`CouplingMap` is the device graph (line, ring, grid, all-to-all, or arbitrary
+edges) with an all-pairs BFS distance matrix. `SabreRouter` implements SABRE
+(Li, Ding & Xie, ASPLOS 2019) -- the algorithm Qiskit ships:
+
+- take the **front layer** of the DAG, the gates with nothing left blocking them;
+- execute every gate that is already legal (a two-qubit gate is legal iff its
+  qubits are coupled);
+- if none are, score every SWAP on an edge touching a front-layer qubit and apply
+  the best. The score is the mean distance the front layer still has to travel,
+  plus a **lookahead** term over the next few gates so the router does not fix
+  one gate by wrecking the next, scaled by a **decay** on recently-moved qubits
+  so it does not shuffle the same qubit back and forth.
+
+`find_layout` is SabreLayout: route forwards, take the mapping you ended on,
+route the *reversed* circuit from it, and use *that* final mapping as the initial
+layout. A good final mapping for a circuit is a good initial mapping for its
+reverse, because the router has already worked out which qubits want to be near
+which.
+
+### Routing permutes the qubits, and forgetting that is the classic bug
+
+The routed circuit does **not** produce the original state vector. It produces
+the original state with its amplitude indices permuted by `final_layout` -- the
+SWAPs moved the logical qubits, and logical qubit `l` now lives on physical qubit
+`final_layout[l]`. Compare the two naively and a *correct* router looks broken;
+skip the comparison and a *broken* router looks correct. `permute_index` closes
+the gap, and one test deliberately checks that the unpermuted comparison FAILS,
+so the check cannot pass vacuously.
+
+### Against Qiskit's transpiler
+
+`bench/route.cpp`, 30 circuits x 60 gates. SWAPs inserted; fewer is better:
+
+| device | 2q gates in | identity layout | SabreLayout | saved |
+|---|---:|---:|---:|---:|
+| line(7) | 792 | 835 | **643** | 23% |
+| ring(7) | 792 | 563 | **444** | 21% |
+| grid(2x4) | 780 | 461 | **330** | 28% |
+| all-to-all | 792 | 0 | 0 | control |
+
+And the comparison that actually matters, in
+`python/tests/test_routing_vs_qiskit.py` -- the same circuits, the same devices,
+through Qiskit's transpiler:
+
+| device | qcdsl | qiskit | |
+|---|---:|---:|---|
+| line(7) | 652 | 621 | **1.05x** |
+| ring(7) | 483 | 423 | 1.14x |
+| grid(2x4) | 384 | 320 | 1.20x |
+
+We lose, by 5% to 27%, to tuned Rust with years behind it. That is the number,
+and it is in the README because a benchmark that only ever measures itself is a
+benchmark that cannot lose.
+
+Where the gap comes from is not a mystery. Raising `trials` improves our absolute
+count (652 -> 637 on the line) but *widens* the ratio, because Qiskit's trials
+randomise the **initial layout** while ours only randomise tie-breaks among
+equally-scored SWAPs. Randomised layout restarts are the next thing to build.
 
 ## Kernels
 

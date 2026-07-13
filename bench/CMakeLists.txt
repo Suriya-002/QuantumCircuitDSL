@@ -9,3 +9,7 @@ target_link_libraries(qcdsl_bench_simulate PRIVATE qcdsl::qcdsl)
 # auto-vectorise however it likes. Handing the baseline -mavx512f as well would
 # be fairer still -- and the README says so.
 target_compile_options(qcdsl_bench_simulate PRIVATE -O2)
+
+add_executable(qcdsl_bench_route route.cpp)
+target_link_libraries(qcdsl_bench_route PRIVATE qcdsl::qcdsl)
+target_compile_options(qcdsl_bench_route PRIVATE -O2)

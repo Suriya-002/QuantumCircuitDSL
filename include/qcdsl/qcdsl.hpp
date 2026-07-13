@@ -3,9 +3,11 @@
 /// Umbrella header. Include this to pull in the whole public API.
 #include "qcdsl/circuit.hpp"
 #include "qcdsl/gate.hpp"
+#include "qcdsl/hw/coupling_map.hpp"
 #include "qcdsl/ir/dag.hpp"
 #include "qcdsl/pass/pass.hpp"
 #include "qcdsl/pass/passes.hpp"
+#include "qcdsl/pass/routing.hpp"
 #include "qcdsl/qasm/qasm3.hpp"
 #include "qcdsl/sim/statevector.hpp"
 #include "qcdsl/version.hpp"

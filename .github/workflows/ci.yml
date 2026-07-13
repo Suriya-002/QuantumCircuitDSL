@@ -8,7 +8,7 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: true
 
 # Every version-sensitive tool is pinned via pip, never apt. apt versions drift
 # between the runner image and a developer's machine, and a coverage or format
@@ -34,8 +34,8 @@ jobs:
             cc: clang
             cxx: clang++
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
@@ -65,8 +65,8 @@ jobs:
     name: format + tidy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
@@ -92,14 +92,14 @@ jobs:
           clang-tidy -p build \
             tests/test_gate.cpp tests/test_circuit.cpp tests/test_statevector.cpp \
             tests/test_dag.cpp tests/test_passes.cpp tests/test_qasm3.cpp \
-            tests/test_kernels.cpp
+            tests/test_kernels.cpp tests/test_routing.cpp
 
   coverage:
     name: coverage
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
@@ -129,7 +129,7 @@ jobs:
                 --print-summary --fail-under-line 90 \
                 --xml-pretty -o coverage.xml
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v4
         with:
           name: coverage-xml
           path: coverage.xml

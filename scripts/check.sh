@@ -33,7 +33,7 @@ echo clean
 step "clang-tidy"
 cmake -S "$SRC" -B "${BUILD}-tidy" -G Ninja -DCMAKE_BUILD_TYPE=Debug -DQCDSL_BUILD_PYTHON=OFF > /dev/null
 clang-tidy -p "${BUILD}-tidy" tests/test_gate.cpp tests/test_circuit.cpp \
-  tests/test_statevector.cpp tests/test_dag.cpp tests/test_passes.cpp tests/test_qasm3.cpp tests/test_kernels.cpp 2>/dev/null
+  tests/test_statevector.cpp tests/test_dag.cpp tests/test_passes.cpp tests/test_qasm3.cpp tests/test_kernels.cpp tests/test_routing.cpp 2>/dev/null
 echo clean
 
 step "coverage (minimum 90 percent)"
