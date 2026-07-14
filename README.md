@@ -15,10 +15,10 @@ both are in the benchmarks.
 
 Part of the reason is a bug in Qiskit: its `SabreLayout` computes a good layout and
 then returns the *last* iterate rather than the best one it saw, so raising
-`max_iterations` makes the result **worse on a third to a half of circuits**. That
-is reported upstream and reproducible in 20 lines. It accounts for roughly half of
-the gap. The other half is a different scoring heuristic, and is not yet
-attributed — see below.
+`max_iterations` makes the result **worse on a third to a half of circuits**.
+`sabre_layout_regression.py` reproduces it in 20 lines of pure Qiskit. It accounts
+for roughly half of the gap; the other half is a different scoring heuristic, and
+is not yet attributed — see below.
 
 Header-only core. No linear-algebra dependency — the state-vector kernels are
 hand-written, because the point of the project is the kernels.
@@ -298,8 +298,8 @@ only variable is how much the descent is allowed to refine it:
 
 More search, worse answer, on a third to a half of all circuits. **If the pass
 kept the best layout it visited, that bottom row would necessarily read 0%.** It
-also reproduces on Qiskit 1.2.4, so it is not a recent regression. Reported
-upstream; the reproducer is `sabre_layout_regression.py`.
+also reproduces on Qiskit 1.2.4, so it is not a recent regression. The reproducer
+is `sabre_layout_regression.py` — pure Qiskit, no other dependencies.
 
 **2. The heuristics are not the same — and the rest of the gap lives here.**
 
