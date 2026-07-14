@@ -9,10 +9,16 @@ Python bindings so it can be driven from a notebook.
 
 **On a 25-qubit grid it inserts 11% fewer SWAPs than Qiskit's transpiler**, at
 matched search budget, with a bootstrap interval that clears zero by a wide
-margin — because Qiskit's `SabreLayout` computes a good layout and then throws it
-away. It takes **1.1x to 3.1x longer** to do it, and on a 16-qubit grid it will
-give you **8% fewer SWAPs at 1.12x the compile time**. Both columns are below,
-and both are in the benchmarks.
+margin. It takes **1.1x to 3.1x longer** to do it, and on a 16-qubit grid it will
+give you **8% fewer SWAPs at 1.12x the compile time**. Both columns are below, and
+both are in the benchmarks.
+
+Part of the reason is a bug in Qiskit: its `SabreLayout` computes a good layout and
+then returns the *last* iterate rather than the best one it saw, so raising
+`max_iterations` makes the result **worse on a third to a half of circuits**. That
+is reported upstream and reproducible in 20 lines. It accounts for roughly half of
+the gap. The other half is a different scoring heuristic, and is not yet
+attributed — see below.
 
 Header-only core. No linear-algebra dependency — the state-vector kernels are
 hand-written, because the point of the project is the kernels.
@@ -261,7 +267,11 @@ routes **both** the cheap winner **and** candidate 0 (the identity descent, whic
 is exactly what `layout_trials = 1` returns) at the full budget, and keeps the
 better. Two tests pin it.
 
-### Why we win: SabreLayout throws away its own best answer
+### Why we win, and how much of it is which
+
+Two separate things are going on, and it is worth not conflating them.
+
+**1. The descent throws away its own best answer — worth about 5%.**
 
 The forward-reverse iteration is a **descent**, and it is **not monotone**. It
 finds a good layout and then wanders off it:
@@ -271,9 +281,36 @@ finds a good layout and then wanders off it:
 | grid(2x4) | **12.7** swaps | 13.4 swaps |
 | ring(7) | **16.4** swaps | 16.7 swaps |
 
-`find_layout` used to return the layout from the **last** iteration. So did
-Qiskit's `SabreLayout` -- run `max_iterations`, take the final one. Keeping the
-**best** iterate instead is free, and it is most of the win above.
+`find_layout` used to return the layout from the **last** iteration. Keeping the
+**best** one instead is free — the forward pass of each iteration already routes
+the circuit, so its swap count *is* that layout's score — and it is worth roughly
+**5%** (grid(3x3): 8.4 → 8.0 swaps).
+
+**Qiskit's `SabreLayout` has the same problem**, and it is visible from outside
+the library. 4x4 grid, 150 random circuits, `layout_trials=1`, `swap_trials=1`,
+and the same seed at every setting, so the starting layout is identical and the
+only variable is how much the descent is allowed to refine it:
+
+| Qiskit `max_iterations` | 1 | 2 | 3 | 4 | 8 |
+|---|---:|---:|---:|---:|---:|
+| mean swaps | 52.63 | 52.04 | **51.23** | 51.59 | 51.63 |
+| circuits made **worse** than at 1 | — | 40% | 33% | 33% | **43%** |
+
+More search, worse answer, on a third to a half of all circuits. **If the pass
+kept the best layout it visited, that bottom row would necessarily read 0%.** It
+also reproduces on Qiskit 1.2.4, so it is not a recent regression. Reported
+upstream; the reproducer is `sabre_layout_regression.py`.
+
+**2. The heuristics are not the same — and the rest of the gap lives here.**
+
+Qiskit's production heuristic scores the raw **sum** of front-layer distances with
+a lookahead weight of `0.5 / num_qubits` (`SetScaling.Constant`). This one scores
+the **mean**, with a fixed `0.5`. Those are different objective functions.
+
+So the remaining ~6% of the gap is **not yet attributed**. Saying "we win because
+of the best-iterate bug" would be tidy, and it would be wrong: that bug accounts
+for roughly half of it, and the honest answer to the other half is that I do not
+know yet.
 
 The second half is that the descent can only improve the layout it is handed; it
 cannot leave that layout's basin. `find_layout` always started from the identity,
