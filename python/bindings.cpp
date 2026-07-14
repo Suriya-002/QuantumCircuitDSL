@@ -205,6 +205,7 @@ PYBIND11_MODULE(_qcdsl, m) {
       .def_readwrite("decay_step", &SabreOptions::decay_step)
       .def_readwrite("trials", &SabreOptions::trials)
       .def_readwrite("layout_trials", &SabreOptions::layout_trials)
+      .def_readwrite("scoring_trials", &SabreOptions::scoring_trials)
       .def_readwrite("seed", &SabreOptions::seed);
 
   py::class_<RoutingResult>(m, "RoutingResult")
@@ -231,7 +232,8 @@ PYBIND11_MODULE(_qcdsl, m) {
            py::arg("circuit"), py::arg("initial_layout"))
       .def("find_layout", &SabreRouter::find_layout, py::arg("circuit"),
            py::arg("iterations") = 3)
-      .def("compile", &SabreRouter::compile, py::arg("circuit"))
+      .def("compile", &SabreRouter::compile, py::arg("circuit"),
+           py::arg("iterations") = 3)
       .def("respects_device", &SabreRouter::respects_device, py::arg("circuit"))
       .def("trivial_layout", &SabreRouter::trivial_layout,
            py::arg("num_logical"));

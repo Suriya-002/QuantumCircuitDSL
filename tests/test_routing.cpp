@@ -322,6 +322,55 @@ TEST(Routing, LayoutTrialsAndSwapTrialsAreDifferentKnobs) {
          "tie-breaks -- see bench/layout_ablation.py";
 }
 
+TEST(Routing, CheapRankingStillNeverMakesItWorse) {
+  // `scoring_trials` ranks a candidate layout with fewer routing passes than
+  // the final route will use. That is a cheap ranking, and a cheap ranking is
+  // not authoritative: the layout that looks best under one pass need not be
+  // the one that routes best under eight.
+  //
+  // So the promise -- raising `layout_trials` can never make the answer worse
+  // -- is no longer free. `compile` keeps it by routing BOTH the cheap winner
+  // and candidate 0 (the identity descent, which is exactly what
+  // layout_trials=1 returns) at the full budget, and keeping the better.
+  //
+  // This test exists because without that play-off the promise breaks silently,
+  // and a silent broken promise is how the last version of this code shipped a
+  // layout chosen under one seed and evaluated under another.
+  const CouplingMap device = CouplingMap::grid(3, 3);
+  for (std::uint64_t seed = 0; seed < 12; ++seed) {
+    const Circuit qc = random_circuit(9, 40, seed);
+
+    SabreRouter::Options one;
+    one.trials = 8;
+    one.layout_trials = 1;
+    one.scoring_trials = 1;
+    one.seed = seed;
+
+    SabreRouter::Options many = one;
+    many.layout_trials = 8;
+
+    const std::size_t few = SabreRouter(device, one).compile(qc).swaps_added;
+    const std::size_t lots = SabreRouter(device, many).compile(qc).swaps_added;
+    EXPECT_LE(lots, few) << "cheap ranking broke the layout_trials guarantee";
+  }
+}
+
+TEST(Routing, CheapRankingCostsQualityButNotCorrectness) {
+  // Ranking with one pass instead of eight is allowed to produce a slightly
+  // worse circuit. It is not allowed to produce a wrong one.
+  const CouplingMap device = CouplingMap::grid(3, 3);
+  SabreRouter::Options opt;
+  opt.trials = 8;
+  opt.layout_trials = 8;
+  opt.scoring_trials = 1;
+  opt.seed = 3;
+  const SabreRouter router(device, opt);
+
+  const Circuit qc = random_circuit(9, 40, 11);
+  const auto r = router.compile(qc);
+  EXPECT_TRUE(router.respects_device(r.circuit));
+}
+
 TEST(Routing, RejectsCircuitsWiderThanTheDevice) {
   const SabreRouter router{CouplingMap::line(3)};
   EXPECT_THROW((void)router.route(Circuit(5)), std::invalid_argument);

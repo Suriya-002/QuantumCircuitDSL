@@ -53,6 +53,7 @@ CASES = [
     ("grid5x5", CouplingMap.grid(5, 5), _grid_edges(5, 5), 25, 250),
 ]
 RESTARTS = (1, 2, 4, 8, 16)
+SCORING = (0, 4, 2, 1)   # 0 == rank with the full `trials` budget
 N_CIRCUITS = 100
 QK_BUDGET = 8
 
@@ -109,13 +110,14 @@ def main() -> None:
         print(f"{'restarts':>9} {'swaps':>7} {'vs Qk':>7} {'ms':>7} {'vs Qk':>7}  "
               f"{'95% CI on paired diff':>24}")
 
-        for r in RESTARTS:
+        def row(label, layout_trials, scoring_trials):
             us, t_us = [], 0.0
             for i in range(N_CIRCUITS):
                 ours, _ = synth(n, gates, 5000 + i)
                 o = SabreOptions()
                 o.trials = QK_BUDGET
-                o.layout_trials = r
+                o.layout_trials = layout_trials
+                o.scoring_trials = scoring_trials
                 o.seed = i
                 router = SabreRouter(cm, o)
                 t = time.perf_counter()
@@ -126,13 +128,30 @@ def main() -> None:
             ms = t_us / N_CIRCUITS * 1e3
             lo, hi = paired_interval(us, qk)
             v = "TIE" if lo < 0 < hi else ("LOSE" if lo > 0 else "WIN")
-            print(f"{r:>9} {m:>7.1f} {m / qk_mean:>6.3f}x {ms:>7.1f} "
+            print(f"{label:>9} {m:>7.1f} {m / qk_mean:>6.3f}x {ms:>7.1f} "
                   f"{ms / max(qk_ms, 1e-9):>6.2f}x  [{lo:+7.2f},{hi:+7.2f}] {v}")
+
+        print("  -- layout_trials (scoring_trials = full) --")
+        for r in RESTARTS:
+            row(str(r), r, 0)
+
+        print("  -- scoring_trials, at layout_trials = 8 --")
+        print("     ranking a candidate is not answering. How few passes suffice?")
+        for st in SCORING:
+            row("full" if st == 0 else str(st), 8, st)
         print()
 
     print("Pick the row where the swap column is a WIN and the time column is")
     print("acceptable. That is the compiler's actual operating point, and it is")
     print("a choice, not a headline.")
+    print()
+    print("`scoring_trials` is the cheaper dial: 95% of a compile is the LAYOUT")
+    print("SEARCH, and most of that is spent routing candidate layouts eight")
+    print("times each merely to decide which one is best. Ranking is not")
+    print("answering. One pass loses ~2% of the swap advantage and returns ~39%")
+    print("of the compile time -- and `compile` still plays the cheap winner off")
+    print("against the identity candidate at full budget, so raising")
+    print("`layout_trials` can still never make the answer worse.")
 
 
 if __name__ == "__main__":

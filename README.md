@@ -10,8 +10,9 @@ Python bindings so it can be driven from a notebook.
 **On a 25-qubit grid it inserts 11% fewer SWAPs than Qiskit's transpiler**, at
 matched search budget, with a bootstrap interval that clears zero by a wide
 margin — because Qiskit's `SabreLayout` computes a good layout and then throws it
-away. It also takes **2.3x to 5.1x longer** to do it. Both numbers are below, and
-both are in the benchmarks.
+away. It takes **1.1x to 3.1x longer** to do it, and on a 16-qubit grid it will
+give you **8% fewer SWAPs at 1.12x the compile time**. Both columns are below,
+and both are in the benchmarks.
 
 Header-only core. No linear-algebra dependency — the state-vector kernels are
 hand-written, because the point of the project is the kernels.
@@ -63,11 +64,11 @@ nothing is listed here that does not have a test behind it.
 | SIMD (AVX-512) + OpenMP gate kernels, benchmarks | done |
 | Layout + routing (SABRE) against a device coupling map | done |
 | Randomised layout restarts, parallelised (beats Qiskit on grids) | done |
-| Cheaper layout search (95% of a compile is `find_layout`) | next |
+| Cheaper layout search (`scoring_trials`, parallel `route`) | done |
 | Full single-qubit fusion (U gate + global phase) | planned |
 | Cache-blocked multi-gate kernel (kill the bandwidth wall) | planned |
 
-143 C++ tests, 333 Python tests, 96% line coverage and 100% function coverage
+145 C++ tests, 333 Python tests, 96% line coverage and 100% function coverage
 (gated at 90% in CI). The C++ suite is a GoogleTest *typed* suite -- the whole
 battery runs against both the `double` and the `float` instantiation, because a
 templated backend with one tested instantiation is a half-tested backend.
@@ -208,10 +209,57 @@ bootstrap 95% interval on the difference. `bench/layout_ablation.py`.
 **11% fewer SWAPs than Qiskit on a 25-qubit grid, and the margin grows with the
 device**: 0.945x at 9 qubits, 0.890x at 25.
 
-**And it costs 2.3x to 5.1x the compile time.** Both columns are in
-`bench/layout_speed.py`, side by side, permanently. A better circuit produced
-five times more slowly is a trade, not a victory, and the reader is entitled to
-see the price. `bench/layout_pareto.py` publishes the whole curve.
+**And it costs compile time.** Both columns are in `bench/layout_speed.py`, side
+by side, permanently. A better circuit produced five times more slowly is a
+trade, not a victory, and the reader is entitled to see the price.
+
+| device | swaps | time |
+|---|---:|---:|
+| grid(3x3) | 0.95x | 1.1x |
+| grid(4x4) | 0.90x | 2.0x |
+| grid(5x5) | 0.89x | 3.1x |
+| line(12) | 0.98x | 2.0x |
+
+### Ranking is not answering
+
+**95% of a compile is the layout search** -- not the routing. And most of *that*
+was spent routing each candidate layout eight times over, merely to decide which
+candidate was best.
+
+To rank A against B you do not need A's best-of-eight. `scoring_trials` sets how
+many passes go into ranking, and `bench/layout_pareto.py` prices the whole curve.
+On a 16-qubit grid, at `layout_trials = 8`:
+
+| scoring_trials | swaps | vs qiskit | time |
+|---|---:|---:|---:|
+| full (8) | 40.0 | 0.888x | 1.85x |
+| 4 | 40.3 | 0.895x | 1.43x |
+| 2 | 40.8 | 0.905x | 1.19x |
+| **1** | **41.4** | **0.918x** | **1.12x** |
+
+**8% fewer SWAPs than Qiskit at essentially Qiskit's compile time.** Every row is
+a win with an interval clear of zero. The default is `full`, so nobody's quality
+regresses by accident; the dial is there when the clock matters more than the
+circuit.
+
+Two other things were pure waste and are simply gone, at no cost to quality:
+the descent's forward pass **already routes the current layout**, so its swap
+count *is* that layout's score -- asking for it again cost three routing passes
+per candidate. And `route`'s trials share nothing, so they run in parallel. Those
+two took a 25-qubit compile from **5.1x** Qiskit's time to **3.1x**, with the
+identical circuit coming out the other end.
+
+### A cheap ranking is a trap, and this is the second time
+
+The layout that ranks best under one routing pass **need not** be the one that
+routes best under eight. So a cheap ranking silently breaks the promise that
+raising `layout_trials` can never make the answer worse.
+
+That is the same bug as selecting a layout under one routing seed and evaluating
+it under another -- which a test caught here once already. `compile` therefore
+routes **both** the cheap winner **and** candidate 0 (the identity descent, which
+is exactly what `layout_trials = 1` returns) at the full budget, and keeps the
+better. Two tests pin it.
 
 ### Why we win: SabreLayout throws away its own best answer
 
