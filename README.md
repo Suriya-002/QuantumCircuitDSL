@@ -1,11 +1,17 @@
 # qcdsl
 
-[![ci](https://github.com/USERNAME/quantum-circuit-dsl/actions/workflows/ci.yml/badge.svg)](https://github.com/USERNAME/quantum-circuit-dsl/actions/workflows/ci.yml)
+[![ci](https://github.com/Suriya-002/QuantumCircuitDSL/actions/workflows/ci.yml/badge.svg)](https://github.com/Suriya-002/QuantumCircuitDSL/actions/workflows/ci.yml)
 
 A quantum circuit **compiler** in C++17: a DAG intermediate representation,
-optimisation passes over that IR, a SIMD state-vector backend to check the
-passes preserve semantics, and Python bindings so it can be driven from a
-notebook.
+optimisation passes over that IR, layout and routing against a device coupling
+map, a SIMD state-vector backend to check the passes preserve semantics, and
+Python bindings so it can be driven from a notebook.
+
+**On a 25-qubit grid it inserts 11% fewer SWAPs than Qiskit's transpiler**, at
+matched search budget, with a bootstrap interval that clears zero by a wide
+margin — because Qiskit's `SabreLayout` computes a good layout and then throws it
+away. It also takes **2.3x to 5.1x longer** to do it. Both numbers are below, and
+both are in the benchmarks.
 
 Header-only core. No linear-algebra dependency — the state-vector kernels are
 hand-written, because the point of the project is the kernels.
@@ -56,10 +62,12 @@ nothing is listed here that does not have a test behind it.
 | OpenQASM 3.0 import / export (two-way Qiskit interop) | done |
 | SIMD (AVX-512) + OpenMP gate kernels, benchmarks | done |
 | Layout + routing (SABRE) against a device coupling map | done |
+| Randomised layout restarts, parallelised (beats Qiskit on grids) | done |
+| Cheaper layout search (95% of a compile is `find_layout`) | next |
 | Full single-qubit fusion (U gate + global phase) | planned |
 | Cache-blocked multi-gate kernel (kill the bandwidth wall) | planned |
 
-140 C++ tests, 333 Python tests, 96% line coverage and 100% function coverage
+143 C++ tests, 333 Python tests, 96% line coverage and 100% function coverage
 (gated at 90% in CI). The C++ suite is a GoogleTest *typed* suite -- the whole
 battery runs against both the `double` and the `float` instantiation, because a
 templated backend with one tested instantiation is a half-tested backend.
@@ -184,33 +192,104 @@ so the check cannot pass vacuously.
 
 ### Against Qiskit's transpiler
 
-`bench/route.cpp`, 30 circuits x 60 gates. SWAPs inserted; fewer is better:
+The comparison that matters. Same circuits, same devices, **same search budget on
+both sides** (8 layout restarts, 8 routing trials), 120 random circuits, paired
+bootstrap 95% interval on the difference. `bench/layout_ablation.py`.
 
-| device | 2q gates in | identity layout | SabreLayout | saved |
-|---|---:|---:|---:|---:|
-| line(7) | 792 | 835 | **643** | 23% |
-| ring(7) | 792 | 563 | **444** | 21% |
-| grid(2x4) | 780 | 461 | **330** | 28% |
-| all-to-all | 792 | 0 | 0 | control |
+| device | qubits | qcdsl | qiskit | | 95% CI on paired diff |
+|---|---:|---:|---:|---|---|
+| grid(3x3) | 9 | **8.0** | 8.4 | **0.945x** | [-0.71, -0.23] |
+| line(12) | 12 | **78.5** | 80.2 | **0.979x** | [-2.63, -0.78] |
+| grid(4x4) | 16 | **40.9** | 45.6 | **0.895x** | [-5.36, -4.22] |
+| grid(5x5) | 25 | **103.5** | 116.3 | **0.890x** | [-13.80, -11.75] |
+| ring(12) | 12 | 61.4 | 61.4 | 1.001x | tie |
+| ring(7) | 7 | 14.8 | 13.9 | 1.061x | we lose |
 
-And the comparison that actually matters, in
-`python/tests/test_routing_vs_qiskit.py` -- the same circuits, the same devices,
-through Qiskit's transpiler:
+**11% fewer SWAPs than Qiskit on a 25-qubit grid, and the margin grows with the
+device**: 0.945x at 9 qubits, 0.890x at 25.
 
-| device | qcdsl | qiskit | |
-|---|---:|---:|---|
-| line(7) | 652 | 621 | **1.05x** |
-| ring(7) | 483 | 423 | 1.14x |
-| grid(2x4) | 384 | 320 | 1.20x |
+**And it costs 2.3x to 5.1x the compile time.** Both columns are in
+`bench/layout_speed.py`, side by side, permanently. A better circuit produced
+five times more slowly is a trade, not a victory, and the reader is entitled to
+see the price. `bench/layout_pareto.py` publishes the whole curve.
 
-We lose, by 5% to 27%, to tuned Rust with years behind it. That is the number,
-and it is in the README because a benchmark that only ever measures itself is a
-benchmark that cannot lose.
+### Why we win: SabreLayout throws away its own best answer
 
-Where the gap comes from is not a mystery. Raising `trials` improves our absolute
-count (652 -> 637 on the line) but *widens* the ratio, because Qiskit's trials
-randomise the **initial layout** while ours only randomise tie-breaks among
-equally-scored SWAPs. Randomised layout restarts are the next thing to build.
+The forward-reverse iteration is a **descent**, and it is **not monotone**. It
+finds a good layout and then wanders off it:
+
+| | iteration 2 | iteration 3 |
+|---|---:|---:|
+| grid(2x4) | **12.7** swaps | 13.4 swaps |
+| ring(7) | **16.4** swaps | 16.7 swaps |
+
+`find_layout` used to return the layout from the **last** iteration. So did
+Qiskit's `SabreLayout` -- run `max_iterations`, take the final one. Keeping the
+**best** iterate instead is free, and it is most of the win above.
+
+The second half is that the descent can only improve the layout it is handed; it
+cannot leave that layout's basin. `find_layout` always started from the identity,
+so however many `trials` it ran, it explored exactly **one** basin. `trials`
+re-rolls tie-breaks inside a basin. `layout_trials` restarts from a different
+random permutation and reaches a different one. Qiskit does this; we did not,
+and it was the entire original 5-27% gap.
+
+### What each piece is actually worth
+
+`bench/layout_ablation.py`. Four configurations, 300 circuits:
+
+| | line(7) | grid(3x3) | grid(5x5) |
+|---|---:|---:|---:|
+| **A** identity layout, no search | 29.2 | 15.1 | 146.7 |
+| **B** descent from identity | 21.0 | 9.8 | 115.8 |
+| **C** descent + 8 random restarts | **20.0** | **8.0** | **103.5** |
+| **D** 8 random layouts, *no* descent | 24.0 | 12.4 | 133.7 |
+
+**D is the control**, and it is what makes this an experiment rather than a
+leaderboard. It gets the same number of random layouts as C and the same routing
+heuristic, but no SABRE refinement at all. C beats D everywhere, so the descent
+is real work and not multi-start in a trench coat. Note also **B ≈ D**: *one*
+descent is worth about *eight* random draws.
+
+The restarts are worth **~5% on 1D and ~21% on 2D** -- four times more on a grid
+than on a chain. On a chain the good layout is nearly forced, so restarting lands
+you back where you began; a grid's basin structure is rich enough that
+multi-start is what finds the good one.
+
+### The gaps that were not real
+
+Almost every deficit worth chasing here turned out to be a **seven-qubit
+artifact**. Router only, identity layout, 250 circuits:
+
+| n | line | ring |
+|---:|---:|---:|
+| 5 | 1.060x | 1.079x |
+| 7 | 1.043x | 1.069x |
+| 9 | 1.012x | 1.040x |
+| **12** | **0.997x** | **1.009x** |
+
+The deficit shrinks monotonically with device size and is **gone by n=12**. Rings
+show it worse than lines because they have fewer edges and fewer swap candidates,
+so tie-breaking dominates; as the device grows the score landscape gets richer
+and the greedy choice stops being a coin flip. There is no ring pathology. An
+afternoon went into looking for one.
+
+Two things this repository now does as a matter of course, because both were
+learned the hard way:
+
+**Report an interval, not a mean.** Thirty random circuits has a standard error
+of roughly ±5%, and the effects being argued about here are 2-6%. The *same code*
+on the *same topology* scored 1.07x against Qiskit on one 30-circuit sample and
+0.99x on another. Every benchmark here now runs 120-300 circuits and prints a
+bootstrap 95% interval on the paired difference. If it straddles zero, no claim
+is made.
+
+**Your threads are part of the experiment.** OpenMP threads busy-wait by default.
+When `layout_speed.py` interleaved the two routers in one loop, our eight threads
+were still spinning while Qiskit's SABRE -- which also parallelises -- tried to
+run. It measured Qiskit at 16.2 ms on a 4x4 grid against a true 5.3 ms, and
+reported that we were **faster** than it. We are not. `OMP_WAIT_POLICY` is now
+forced to `PASSIVE` and the two are timed in separate passes.
 
 ## Kernels
 
@@ -299,7 +378,7 @@ And the 0% LL miss rate at 18 qubits is the other end of the bandwidth story: at
 that size nothing reaches DRAM, which is exactly why the table reads 46 GB/s
 there and 21 GB/s at 22 qubits.
 
-## Build## Build
+## Build
 
 Requires CMake ≥ 3.20 and a C++17 compiler. GoogleTest and pybind11 are pulled
 in by `FetchContent`; nothing needs to be installed by hand.
