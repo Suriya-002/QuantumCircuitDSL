@@ -16,7 +16,7 @@ both are in the benchmarks.
 Part of the reason is a bug in Qiskit: its `SabreLayout` computes a good layout and
 then returns the *last* iterate rather than the best one it saw, so raising
 `max_iterations` makes the result **worse on a third to a half of circuits**.
-`sabre_layout_regression.py` reproduces it in 20 lines of pure Qiskit. It accounts
+`sabre_layout_regression.py` reproduces it in 20 lines of pure Qiskit, and it is reported upstream as Qiskit/qiskit#16612. It accounts
 for roughly half of the gap; the other half is a different scoring heuristic, and
 is not yet attributed — see below.
 
@@ -299,7 +299,7 @@ only variable is how much the descent is allowed to refine it:
 More search, worse answer, on a third to a half of all circuits. **If the pass
 kept the best layout it visited, that bottom row would necessarily read 0%.** It
 also reproduces on Qiskit 1.2.4, so it is not a recent regression. The reproducer
-is `sabre_layout_regression.py` — pure Qiskit, no other dependencies.
+is `sabre_layout_regression.py` — pure Qiskit, no other dependencies. Reported upstream: https://github.com/Qiskit/qiskit/issues/16612
 
 **2. The heuristics are not the same — and the rest of the gap lives here.**
 
