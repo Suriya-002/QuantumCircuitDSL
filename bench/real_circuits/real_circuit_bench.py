@@ -5,7 +5,7 @@
 Every routing number in the qcdsl repo is measured on random CX circuits. That
 is the repo's one real weakness: random circuits have no structure, and real
 quantum programs do. This runs the same head-to-head on circuits from QASMBench
-(Wu et al.) -- QFT at several sizes plus an arithmetic adder -- which have the
+(Li, Stein, Krishnamoorthy, Ang; arXiv:2005.13018) -- QFT at several sizes plus an arithmetic adder -- which have the
 dense or long-range interaction that actually stresses a router.
 
 Most QASMBench circuits turn out to be already-local on a grid and need zero
