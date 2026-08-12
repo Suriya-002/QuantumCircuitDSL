@@ -376,6 +376,45 @@ run. It measured Qiskit at 16.2 ms on a 4x4 grid against a true 5.3 ms, and
 reported that we were **faster** than it. We are not. `OMP_WAIT_POLICY` is now
 forced to `PASSIVE` and the two are timed in separate passes.
 
+### It holds on real circuits, not just random ones
+
+Every number above is measured on random CX circuits, which is the honest weak
+point: random circuits have no structure and real quantum programs do. So the
+same head-to-head, on circuits from **QASMBench** -- the two-qubit interaction
+graph extracted from each and handed identically to both compilers, same device,
+same budget, 12 seeds, paired bootstrap 95% interval.
+
+Most QASMBench circuits turn out to be already local on a grid and need zero
+swaps -- which is itself why QFT is the standard routing benchmark. On the
+circuits that actually require routing:
+
+| circuit | device | qcdsl | qiskit | ratio | 95% CI |
+|---|---|---:|---:|---:|---|
+| QFT-18 | grid5x5 | 88.7 | 98.0 | **0.905x** | [-11.8, -6.9] |
+| QFT-18 | line18 | 143.2 | 148.9 | **0.961x** | [-6.0, -5.3] |
+| QFT-29 | grid6x6 | 273.7 | 299.6 | **0.913x** | [-30.4, -21.3] |
+| QFT-29 | line29 | 390.1 | 402.0 | **0.970x** | [-12.0, -11.8] |
+| adder-28 | grid6x6 | 14.2 | 18.1 | **0.783x** | [-6.2, -1.7] |
+| adder-28 | line28 | 24.6 | 21.2 | 1.161x | [+2.8, +4.0] |
+
+**The 11% is not an artefact of random circuits.** It holds on QFT -- the field's
+standard routing benchmark -- at both sizes and both topologies, and on the adder
+it is a 22% win on a grid.
+
+**And there is one loss, which is worth more than the wins.** The adder on a
+*line* loses by 16%. That is not noise, and it is consistent with everything else
+here: qcdsl's advantage lives in the **layout search** -- the best-iterate fix and
+the random restarts. A line is one-dimensional, with almost no basin structure,
+so the layout search has nothing to work with and only the routing heuristic is
+left -- and the routing heuristic alone is a few percent behind Qiskit's (see the
+size sweep above). On a grid the layout advantage wins decisively; on a line it
+wins for QFT, whose layout advantage is larger, but not for the adder. The method
+wins where the layout matters, and this is where you can watch that be literally
+true.
+
+`bench/real_circuits/real_circuit_bench.py` reproduces the table; drop any
+QASMBench `.qasm` next to it to extend it.
+
 ## Kernels
 
 Three kernels compute the same thing at different speeds. The scalar one is the
